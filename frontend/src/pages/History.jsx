@@ -1,24 +1,56 @@
-import React, { useState, useEffect } from 'react';
-import { History as HistoryIcon, Download, Eye, Calendar, Building2, FileText, X } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { History as HistoryIcon, Download, Eye, Calendar, Building2, FileText, X, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getApplications, getPdfDownloadUrl, getHtmlPreviewUrl } from '../services/api';
+import { useToast } from '../context/ToastContext';
+
+const PAGE_SIZE = 10;
 
 const History = () => {
+  const { showToast } = useToast();
   const [applications, setApplications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [previewApp, setPreviewApp] = useState(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, pages: 1 });
 
+  // Debounce search input
   useEffect(() => {
-    const fetchApps = async () => {
-      try {
-        const data = await getApplications();
-        setApplications(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const fetchApps = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const result = await getApplications({ page, limit: PAGE_SIZE, search: debouncedSearch });
+      // Support both paginated and legacy (array) responses
+      if (Array.isArray(result)) {
+        setApplications(result);
+        setPagination({ total: result.length, pages: 1 });
+      } else {
+        setApplications(result.data || []);
+        setPagination(result.pagination || { total: 0, pages: 1 });
       }
-    };
-    fetchApps();
+    } catch (err) {
+      console.error(err);
+      showToast('Error loading history', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, debouncedSearch]);
+
+  useEffect(() => { fetchApps(); }, [fetchApps]);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') setPreviewApp(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   return (
@@ -28,6 +60,27 @@ const History = () => {
           <HistoryIcon size={32} color="#818cf8" /> Application History
         </h1>
         <p>View all the CVs you've generated, download them again, or preview them.</p>
+      </div>
+
+      {/* Search bar */}
+      <div style={{ marginBottom: '1.5rem', position: 'relative', maxWidth: '420px' }}>
+        <Search size={17} style={{ position: 'absolute', left: '0.9rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Search by job title or company..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ paddingLeft: '2.5rem' }}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -42,52 +95,85 @@ const History = () => {
       ) : applications.length === 0 ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '4rem' }}>
           <FileText size={48} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
-          <h3 style={{ color: 'var(--text-muted)' }}>No applications yet</h3>
-          <p style={{ marginBottom: 0 }}>You haven't generated any CVs yet. Go to "Apply for Role" to get started.</p>
+          <h3 style={{ color: 'var(--text-muted)' }}>
+            {debouncedSearch ? `No results for "${debouncedSearch}"` : 'No applications yet'}
+          </h3>
+          <p style={{ marginBottom: 0 }}>
+            {debouncedSearch
+              ? 'Try a different search term.'
+              : 'You haven\'t generated any CVs yet. Go to "Apply for Role" to get started.'}
+          </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          {applications.map(app => (
-            <div key={app.id} className="glass-panel" style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem' }}>{app.job_title}</h3>
-                <p style={{ margin: '0 0 0.5rem 0', color: '#c084fc', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Building2 size={14} /> {app.company_name}
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  <Calendar size={13} />
-                  {new Date(app.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  {app.generated_cv && (
-                    <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', padding: '0.15rem 0.6rem', borderRadius: '20px', fontSize: '0.78rem', marginLeft: '0.5rem' }}>
-                      CV Generated
-                    </span>
-                  )}
+        <>
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {applications.map(app => (
+              <div key={app.id} className="glass-panel" style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem' }}>{app.job_title}</h3>
+                  <p style={{ margin: '0 0 0.5rem 0', color: '#c084fc', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Building2 size={14} /> {app.company_name}
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    <Calendar size={13} />
+                    {new Date(app.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                    {app.generated_cv && (
+                      <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', padding: '0.15rem 0.6rem', borderRadius: '20px', fontSize: '0.78rem', marginLeft: '0.5rem' }}>
+                        CV Generated
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {app.generated_cv && (
-                <div style={{ display: 'flex', gap: '0.6rem', flexShrink: 0 }}>
-                  <button
-                    onClick={() => setPreviewApp(app)}
-                    className="btn btn-secondary"
-                    style={{ padding: '0.55rem 1rem', fontSize: '0.9rem' }}
-                  >
-                    <Eye size={16} /> Preview
-                  </button>
-                  <a
-                    href={getPdfDownloadUrl(app.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-primary"
-                    style={{ padding: '0.55rem 1rem', fontSize: '0.9rem', textDecoration: 'none' }}
-                  >
-                    <Download size={16} /> PDF
-                  </a>
-                </div>
-              )}
+                {app.generated_cv && (
+                  <div style={{ display: 'flex', gap: '0.6rem', flexShrink: 0 }}>
+                    <button
+                      onClick={() => setPreviewApp(app)}
+                      className="btn btn-secondary"
+                      style={{ padding: '0.55rem 1rem', fontSize: '0.9rem' }}
+                    >
+                      <Eye size={16} /> Preview
+                    </button>
+                    <a
+                      href={getPdfDownloadUrl(app.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-primary"
+                      style={{ padding: '0.55rem 1rem', fontSize: '0.9rem', textDecoration: 'none' }}
+                    >
+                      <Download size={16} /> PDF
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {pagination.pages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '0.5rem 1rem' }}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+              >
+                <ChevronLeft size={16} /> Prev
+              </button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                Page {page} of {pagination.pages} ({pagination.total} total)
+              </span>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '0.5rem 1rem' }}
+                onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
+                disabled={page === pagination.pages}
+              >
+                Next <ChevronRight size={16} />
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Preview Modal */}

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
 });
 
 // Attach token from localStorage on every request
@@ -71,8 +71,10 @@ export const generateCV = async (data) => {
   return response.data;
 };
 
-export const getApplications = async () => {
-  const response = await api.get('/applications');
+export const getApplications = async ({ page = 1, limit = 20, search = '' } = {}) => {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search) params.set('search', search);
+  const response = await api.get(`/applications?${params}`);
   return response.data;
 };
 

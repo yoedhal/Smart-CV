@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import Navbar from './components/Navbar';
+import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import JobSearch from './pages/JobSearch';
 import History from './pages/History';
@@ -39,6 +40,7 @@ const AppContent = () => {
     <>
       {user && <Navbar />}
       <div className={user ? 'page-wrapper container' : ''}>
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
           <Route path="/register" element={!user ? <Register /> : <Navigate to="/" replace />} />
@@ -47,6 +49,7 @@ const AppContent = () => {
           <Route path="/history" element={<PrivateRoute><History /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </div>
     </>
   );

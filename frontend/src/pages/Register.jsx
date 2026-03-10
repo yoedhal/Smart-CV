@@ -23,8 +23,8 @@ const Register = () => {
       return;
     }
 
-    if (password.length < 6) {
-      showToast('Password must be at least 6 characters long', 'error');
+    if (password.length < 8) {
+      showToast('Password must be at least 8 characters long', 'error');
       return;
     }
 
@@ -85,7 +85,7 @@ const Register = () => {
           </div>
 
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Password (Min 6 characters)</label>
+            <label className="form-label">Password (Min 8 characters)</label>
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
