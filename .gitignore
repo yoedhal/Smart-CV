@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+dist/
+build/
+.DS_Store
+
+# Environment variables
+.env
+*.local
+
+# Database
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+*.log

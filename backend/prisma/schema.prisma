@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  password_hash   String
+  full_name       String
+  created_at      DateTime          @default(now())
+  master_profiles MasterProfile[]
+  job_applications JobApplication[]
+}
+
+model MasterProfile {
+  id                   String        @id @default(uuid())
+  user_id              String
+  user                 User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  contact_email        String?
+  phone                String?
+  linkedin_url         String?
+  location             String?
+  professional_summary String?
+  experiences          Experience[]
+  educations           Education[]
+  skills               Skill[]
+}
+
+model Experience {
+  id                String        @id @default(uuid())
+  master_profile_id String
+  master_profile    MasterProfile @relation(fields: [master_profile_id], references: [id], onDelete: Cascade)
+  company           String
+  role              String
+  start_date        DateTime
+  end_date          DateTime?
+  description       String?
+  responsibilities  String          // Stored as JSON string
+}
+
+model Education {
+  id                String        @id @default(uuid())
+  master_profile_id String
+  master_profile    MasterProfile @relation(fields: [master_profile_id], references: [id], onDelete: Cascade)
+  institution       String
+  degree            String
+  start_date        DateTime
+  end_date          DateTime?
+}
+
+model Skill {
+  id                String        @id @default(uuid())
+  master_profile_id String
+  master_profile    MasterProfile @relation(fields: [master_profile_id], references: [id], onDelete: Cascade)
+  name              String
+  category          String?       // "Soft", "Hard", "Tools"
+}
+
+model JobApplication {
+  id                   String        @id @default(uuid())
+  user_id              String
+  user                 User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  job_title            String
+  company_name         String
+  job_description_text String
+  original_url         String?
+  created_at           DateTime      @default(now())
+  generated_cv         GeneratedCV?
+}
+
+model GeneratedCV {
+  id                 String         @id @default(uuid())
+  job_application_id String         @unique
+  job_application    JobApplication @relation(fields: [job_application_id], references: [id], onDelete: Cascade)
+  tailored_content   String           // Stored as JSON string
+  pdf_url            String?
+  generated_at       DateTime       @default(now())
+}
