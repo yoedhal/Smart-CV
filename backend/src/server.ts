@@ -1,87 +1,177 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import prisma from './db';
 import { GoogleGenAI } from '@google/genai';
+import { generatePdfFromHtml, buildCvHtml } from './pdfService';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'smartcv-dev-secret-2024';
 
 app.use(cors());
 app.use(express.json());
 
-// Default simple test user ID (since we don't have auth yet)
-// We will create this user on startup
-const TEST_USER_ID = 'test-user-id';
-
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', message: 'Smart CV API is running' });
-});
-
-// Create a dummy user on startup for MVP
-async function ensureTestUser() {
-  try {
-    const user = await prisma.user.upsert({
-      where: { id: TEST_USER_ID },
-      update: {},
-      create: {
-        id: TEST_USER_ID,
-        email: 'test@example.com',
-        password_hash: 'dummy',
-        full_name: 'Test Setup User'
-      }
-    });
-
-    // Ensure Master Profile exists
-    await prisma.masterProfile.upsert({
-      where: { id: 'test-master-profile' },
-      update: {},
-      create: {
-        id: 'test-master-profile',
-        user_id: user.id,
-        contact_email: 'test@example.com',
-      }
-    });
-    
-    console.log("Test user and master profile ensured.");
-  } catch (error) {
-    console.error("Error creating test user:", error);
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
+declare global {
+  namespace Express {
+    interface Request {
+      user?: { id: string; email: string };
+    }
   }
 }
 
-ensureTestUser();
+// ──────────────────────────────────────────────
+// Auth Middleware
+// ──────────────────────────────────────────────
+const authenticate = (req: Request, res: Response, next: NextFunction): void => {
+  const authHeader = req.headers['authorization'];
+  // Support token via Authorization header OR query param (needed for iframe/browser download)
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+  const token = (authHeader && authHeader.split(' ')[1]) || queryToken;
 
-// --- MASTER PROFILE ROUTES ---
+  if (!token) {
+    res.status(401).json({ error: 'נדרש אימות. אנא התחבר מחדש.' });
+    return;
+  }
 
-// Get Master Profile
-app.get('/api/master-profile', async (req: Request, res: Response) => {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(403).json({ error: 'טוקן לא תקין, אנא התחבר מחדש.' });
+  }
+};
+
+// ──────────────────────────────────────────────
+// Health
+// ──────────────────────────────────────────────
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', message: 'Smart CV API is running' });
+});
+
+// ──────────────────────────────────────────────
+// Auth Routes
+// ──────────────────────────────────────────────
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { email, password, full_name } = req.body;
+
+    if (!email || !password || !full_name) {
+      res.status(400).json({ error: 'נא למלא את כל השדות' });
+      return;
+    }
+
+    if (password.length < 6) {
+      res.status(400).json({ error: 'הסיסמה חייבת להכיל לפחות 6 תווים' });
+      return;
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(409).json({ error: 'כתובת האימייל כבר רשומה במערכת' });
+      return;
+    }
+
+    const password_hash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({
+      data: { email, password_hash, full_name }
+    });
+
+    // Auto-create master profile for new user
+    await prisma.masterProfile.create({
+      data: { user_id: user.id, contact_email: email }
+    });
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.status(201).json({
+      token,
+      user: { id: user.id, email: user.email, full_name: user.full_name }
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'שגיאה בהרשמה, נסה שוב' });
+  }
+});
+
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      res.status(400).json({ error: 'נא למלא אימייל וסיסמה' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      return;
+    }
+
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    if (!isValid) {
+      res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      return;
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, full_name: user.full_name }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'שגיאה בהתחברות, נסה שוב' });
+  }
+});
+
+// ──────────────────────────────────────────────
+// Master Profile Routes (all protected)
+// ──────────────────────────────────────────────
+app.get('/api/master-profile', authenticate, async (req: Request, res: Response) => {
   try {
     const profile = await prisma.masterProfile.findFirst({
-      where: { user_id: TEST_USER_ID },
+      where: { user_id: req.user!.id },
       include: {
-        experiences: true,
-        educations: true,
-        skills: true
+        experiences: { orderBy: { start_date: 'desc' } },
+        educations: { orderBy: { start_date: 'desc' } },
+        skills: true,
+        user: true
       }
     });
     res.json(profile);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch profile' });
+    res.status(500).json({ error: 'שגיאה בטעינת הפרופיל' });
   }
 });
 
-// Update Master Profile (Basic Info)
-app.put('/api/master-profile', async (req: Request, res: Response) => {
+app.put('/api/master-profile', authenticate, async (req: Request, res: Response) => {
   try {
     const { contact_email, phone, linkedin_url, location, professional_summary } = req.body;
-    
-    const profile = await prisma.masterProfile.findFirst({
-      where: { user_id: TEST_USER_ID }
-    });
 
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
+    if (!profile) {
+      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      return;
+    }
+
+    // Update user's full_name if provided
+    if (req.body.full_name) {
+      await prisma.user.update({
+        where: { id: req.user!.id },
+        data: { full_name: req.body.full_name }
+      });
+    }
 
     const updated = await prisma.masterProfile.update({
       where: { id: profile.id },
@@ -90,17 +180,19 @@ app.put('/api/master-profile', async (req: Request, res: Response) => {
 
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update profile' });
+    res.status(500).json({ error: 'שגיאה בשמירת הפרופיל' });
   }
 });
 
-// Add Experience
-app.post('/api/master-profile/experience', async (req: Request, res: Response) => {
+app.post('/api/master-profile/experience', authenticate, async (req: Request, res: Response) => {
   try {
     const { company, role, start_date, end_date, description, responsibilities } = req.body;
-    
-    const profile = await prisma.masterProfile.findFirst({ where: { user_id: TEST_USER_ID } });
-    if (!profile) return res.status(404).send('Profile not found');
+
+    const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
+    if (!profile) {
+      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      return;
+    }
 
     const exp = await prisma.experience.create({
       data: {
@@ -116,53 +208,54 @@ app.post('/api/master-profile/experience', async (req: Request, res: Response) =
 
     res.json(exp);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add experience' });
+    res.status(500).json({ error: 'שגיאה בהוספת ניסיון' });
   }
 });
 
-
-// Delete Experience
-app.delete('/api/master-profile/experience/:id', async (req: Request, res: Response) => {
+app.delete('/api/master-profile/experience/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    await prisma.experience.delete({ where: { id: req.params.id } });
+    await prisma.experience.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete experience' });
+    res.status(500).json({ error: 'שגיאה במחיקת ניסיון' });
   }
 });
 
-// Add Skill
-app.post('/api/master-profile/skill', async (req: Request, res: Response) => {
+app.post('/api/master-profile/skill', authenticate, async (req: Request, res: Response) => {
   try {
     const { name, category } = req.body;
-    const profile = await prisma.masterProfile.findFirst({ where: { user_id: TEST_USER_ID } });
-    if (!profile) return res.status(404).send('Profile not found');
+    const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
+    if (!profile) {
+      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      return;
+    }
 
     const skill = await prisma.skill.create({
-      data: { master_profile_id: profile.id, name, category }
+      data: { master_profile_id: profile.id, name, category: category || 'General' }
     });
     res.json(skill);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add skill' });
+    res.status(500).json({ error: 'שגיאה בהוספת כישור' });
   }
 });
 
-// Delete Skill
-app.delete('/api/master-profile/skill/:id', async (req: Request, res: Response) => {
+app.delete('/api/master-profile/skill/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    await prisma.skill.delete({ where: { id: req.params.id } });
+    await prisma.skill.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete skill' });
+    res.status(500).json({ error: 'שגיאה במחיקת כישור' });
   }
 });
 
-// Add Education
-app.post('/api/master-profile/education', async (req: Request, res: Response) => {
+app.post('/api/master-profile/education', authenticate, async (req: Request, res: Response) => {
   try {
     const { institution, degree, start_date, end_date } = req.body;
-    const profile = await prisma.masterProfile.findFirst({ where: { user_id: TEST_USER_ID } });
-    if (!profile) return res.status(404).send('Profile not found');
+    const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
+    if (!profile) {
+      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      return;
+    }
 
     const edu = await prisma.education.create({
       data: {
@@ -175,217 +268,220 @@ app.post('/api/master-profile/education', async (req: Request, res: Response) =>
     });
     res.json(edu);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add education' });
+    res.status(500).json({ error: 'שגיאה בהוספת השכלה' });
   }
 });
 
-// Delete Education
-app.delete('/api/master-profile/education/:id', async (req: Request, res: Response) => {
+app.delete('/api/master-profile/education/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    await prisma.education.delete({ where: { id: req.params.id } });
+    await prisma.education.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete education' });
+    res.status(500).json({ error: 'שגיאה במחיקת השכלה' });
   }
 });
 
-
-// --- AI CV GENERATOR ROUTES ---
-
-import { generatePdfFromHtml, buildCvHtml } from './pdfService';
-
-app.post('/api/generate-cv', async (req: Request, res: Response) => {
+// ──────────────────────────────────────────────
+// AI CV Generation
+// ──────────────────────────────────────────────
+app.post('/api/generate-cv', authenticate, async (req: Request, res: Response) => {
   try {
     const { job_title, company_name, job_description_text } = req.body;
-    
-    // 1. Fetch full Master Profile
+
     const profile = await prisma.masterProfile.findFirst({
-      where: { user_id: TEST_USER_ID },
+      where: { user_id: req.user!.id },
       include: { experiences: true, educations: true, skills: true, user: true }
     });
 
-    // Removed strict check for incomplete profile so user can test freely.
-    // if (!profile) return res.status(404).json({ error: 'Master profile incomplete' });
-
-    // 2. Setup Gemini AI Call
     const safeProfile = profile || { skills: [], experiences: [], educations: [] };
-    let tailoredContent = {
-      message: "AI tailored content generated using Google Gemini.",
-      filtered_skills: safeProfile.skills,
-      filtered_experiences: safeProfile.experiences,
-      filtered_educations: safeProfile.educations
+
+    let tailoredContent: any = {
+      message: 'תוכן מותאם על ידי Google Gemini AI.',
+      filtered_skills: (safeProfile as any).skills || [],
+      filtered_experiences: (safeProfile as any).experiences || [],
+      filtered_educations: (safeProfile as any).educations || []
     };
 
+    // Gemini AI tailoring
     try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (apiKey && profile) { // Only call Gemini if we have profile data to work with
-           const ai = new GoogleGenAI({ apiKey });
-           
-           const systemPrompt = `You are an expert HR AI assistant. Your goal is to tailor the user's master profile to a specific job description. 
-           Instructions:
-           1. Select only the most relevant skills.
-           2. Select the most relevant work experiences.
-           3. For each selected experience, you can slightly prioritize or rephrase the "responsibilities" to highlight match the job's keywords.
-           4. Return a strict JSON object with:
-              - "filtered_skills": array of skill strings that match.
-              - "filtered_experiences": array of objects: { "id": "original_id", "responsibilities": ["bullet 1", "bullet 2"] }
-           5. Do NOT include any explanations or markdown formatting. Just the JSON.`;
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey && profile && profile.experiences.length > 0) {
+        const ai = new GoogleGenAI({ apiKey });
 
-           const promptText = `
+        const systemPrompt = `You are an expert HR AI assistant. Your goal is to tailor the user's master profile to a specific job description.
+Instructions:
+1. Select only the most relevant skills (as array of name strings).
+2. Select the most relevant work experiences (by their ID).
+3. For each selected experience, rephrase the "responsibilities" to highlight keywords from the job description.
+4. Return ONLY a strict JSON object with:
+   - "filtered_skills": array of skill name strings that match.
+   - "filtered_experiences": array of objects: { "id": "original_id", "responsibilities": ["bullet 1", "bullet 2"] }
+5. Do NOT include any explanations or markdown. Just raw JSON.`;
+
+        const promptText = `
+Job Title: ${job_title || 'Not specified'}
+Company: ${company_name || 'Not specified'}
 Job Description:
 ${job_description_text}
 
-Candidate Master Profile Data:
+Candidate Profile:
 Skills: ${JSON.stringify(profile.skills.map(s => s.name))}
-Experience: ${JSON.stringify(profile.experiences.map(e => ({ id: e.id, role: e.role, company: e.company, responsibilities: JSON.parse(e.responsibilities || '[]') })))}
-           `;
+Experience: ${JSON.stringify(profile.experiences.map(e => ({
+  id: e.id,
+  role: e.role,
+  company: e.company,
+  responsibilities: (() => { try { return JSON.parse(e.responsibilities || '[]'); } catch { return []; } })()
+})))}
+`;
 
-           const result = await ai.models.generateContent({
-               model: 'gemini-2.0-flash',
-               contents: promptText,
-               config: { systemInstruction: systemPrompt }
-           });
-           
-           const aiResponseText = result.text;
-           if(aiResponseText) {
-               try {
-                   const cleanJson = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
-                   const parsed = JSON.parse(cleanJson);
-                   
-                   if (parsed.filtered_skills) {
-                       tailoredContent.filtered_skills = profile.skills.filter(s => 
-                           parsed.filtered_skills.some((name: string) => name.toLowerCase().includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(name.toLowerCase()))
-                       );
-                   }
-                   
-                   if (parsed.filtered_experiences) {
-                       tailoredContent.filtered_experiences = parsed.filtered_experiences.map((aiExp: any) => {
-                           const original = profile.experiences.find(e => e.id === aiExp.id);
-                           if (original) {
-                               return {
-                                   ...original,
-                                   responsibilities: JSON.stringify(aiExp.responsibilities || JSON.parse(original.responsibilities || '[]'))
-                               };
-                           }
-                           return null;
-                       }).filter(Boolean);
-                   }
-                   
-                   console.log("Successfully tailored CV with Gemini AI.");
-               } catch (parseError) {
-                   console.error("Failed to parse Gemini JSON, using fallback:", parseError, aiResponseText);
-               }
-           }
-        } else {
-           console.log("GEMINI_API_KEY or Profile data missing. skipping Gemini call.");
+        const result = await ai.models.generateContent({
+          model: 'gemini-2.0-flash',
+          contents: promptText,
+          config: { systemInstruction: systemPrompt }
+        });
+
+        const aiResponseText = result.text;
+        if (aiResponseText) {
+          try {
+            const cleanJson = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleanJson);
+
+            if (parsed.filtered_skills) {
+              tailoredContent.filtered_skills = profile.skills.filter(s =>
+                parsed.filtered_skills.some((name: string) =>
+                  name.toLowerCase().includes(s.name.toLowerCase()) ||
+                  s.name.toLowerCase().includes(name.toLowerCase())
+                )
+              );
+            }
+
+            if (parsed.filtered_experiences) {
+              tailoredContent.filtered_experiences = parsed.filtered_experiences
+                .map((aiExp: any) => {
+                  const original = profile.experiences.find(e => e.id === aiExp.id);
+                  if (original) {
+                    return {
+                      ...original,
+                      responsibilities: JSON.stringify(aiExp.responsibilities || JSON.parse(original.responsibilities || '[]'))
+                    };
+                  }
+                  return null;
+                })
+                .filter(Boolean);
+            }
+
+            tailoredContent.filtered_educations = profile.educations;
+            console.log('Successfully tailored CV with Gemini AI.');
+          } catch (parseError) {
+            console.error('Failed to parse Gemini JSON, using full profile:', parseError);
+          }
         }
-    } catch(aiError) {
-        console.error("Gemini failed, falling back to all profile data:", aiError);
+      } else {
+        console.log('Gemini skipped: missing API key or empty profile.');
+      }
+    } catch (aiError) {
+      console.error('Gemini error, using full profile as fallback:', aiError);
     }
 
-    // 3. Save Job Application
+    // Save JobApplication
     const jobApp = await prisma.jobApplication.create({
       data: {
-        user_id: TEST_USER_ID,
-        job_title: job_title || 'Software Engineer',
-        company_name: company_name || 'Tech Corp',
+        user_id: req.user!.id,
+        job_title: job_title || 'תפקיד לא מוגדר',
+        company_name: company_name || 'חברה לא מוגדרת',
         job_description_text: job_description_text
       }
     });
 
-    // 4. Save Generated CV Data
+    // Save GeneratedCV
     const genCv = await prisma.generatedCV.create({
       data: {
         job_application_id: jobApp.id,
-        tailored_content: JSON.stringify(tailoredContent) // saving stringified json
+        tailored_content: JSON.stringify(tailoredContent)
       }
     });
 
-    res.json(genCv);
+    res.json({ ...genCv, job_application_id: jobApp.id });
   } catch (error) {
-    console.error("AI Gen error:", error);
-    res.status(500).json({ error: 'Failed to generate CV. Make sure you entered data into Master Profile.' });
+    console.error('CV generation error:', error);
+    res.status(500).json({ error: 'שגיאה ביצירת קורות חיים. וודא שמילאת מידע בפרופיל.' });
   }
 });
 
-app.get('/api/cv/:jobAppId/pdf', async (req: Request, res: Response) => {
+// ──────────────────────────────────────────────
+// CV Download / Preview
+// ──────────────────────────────────────────────
+async function buildCvData(jobAppId: string) {
+  const genCv = await prisma.generatedCV.findUnique({
+    where: { job_application_id: jobAppId }
+  });
+  if (!genCv) return null;
+
+  const jobApp = await prisma.jobApplication.findUnique({
+    where: { id: jobAppId },
+    include: { user: true }
+  });
+  if (!jobApp) return null;
+
+  const profile: any = await prisma.masterProfile.findFirst({
+    where: { user_id: jobApp.user_id }
+  });
+
+  const tailored = JSON.parse(genCv.tailored_content);
+  profile.experiences = tailored.filtered_experiences || [];
+  profile.educations = tailored.filtered_educations || [];
+  profile.skills = tailored.filtered_skills || [];
+  profile.full_name = (jobApp as any).user?.full_name || '';
+
+  return { genCv, jobApp, profile };
+}
+
+app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Response) => {
   try {
-    // 1. Get CV Data
-    const genCv = await prisma.generatedCV.findUnique({
-      where: { job_application_id: req.params.jobAppId },
-      include: { 
-        job_application: { include: { user: true } }
-      }
-    });
+    const data = await buildCvData(String(req.params.jobAppId));
+    if (!data) { res.status(404).send('קורות חיים לא נמצאו'); return; }
 
-    if (!genCv) return res.status(404).send('CV not found');
-
-    // Also get Master Profile to build the top data quickly
-    const profile: any = await prisma.masterProfile.findFirst({
-      where: { user_id: genCv.job_application.user.id }
-    });
-    
-    // Merge full Master info with AI filtered lists
-    const tailored = JSON.parse(genCv.tailored_content);
-    profile.experiences = tailored.filtered_experiences;
-    profile.educations = tailored.filtered_educations;
-    profile.skills = tailored.filtered_skills;
-    profile.full_name = genCv.job_application.user.full_name;
-
-    // 2. Build HTML and Render PDF
-    const html = buildCvHtml(profile, genCv.job_application.job_description_text);
+    const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
     const pdfBuffer = await generatePdfFromHtml(html);
 
-    res.contentType("application/pdf");
-    res.setHeader('Content-Disposition', `attachment; filename="SmartCV_${genCv.job_application.company_name}.pdf"`);
+    res.contentType('application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="SmartCV_${data.jobApp.company_name}.pdf"`);
     res.send(pdfBuffer);
   } catch (error) {
-    console.error("PDF generation error:", error);
-    res.status(500).send('Error generating PDF.');
+    console.error('PDF generation error:', error);
+    res.status(500).send('שגיאה ביצירת ה-PDF.');
   }
 });
 
-app.get('/api/applications', async (req: Request, res: Response) => {
+app.get('/api/cv/:jobAppId/html', authenticate, async (req: Request, res: Response) => {
+  try {
+    const data = await buildCvData(String(req.params.jobAppId));
+    if (!data) { res.status(404).send('קורות חיים לא נמצאו'); return; }
+
+    const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
+    res.send(html);
+  } catch (error) {
+    console.error('HTML preview error:', error);
+    res.status(500).send('שגיאה ביצירת תצוגה מקדימה.');
+  }
+});
+
+// ──────────────────────────────────────────────
+// Applications History
+// ──────────────────────────────────────────────
+app.get('/api/applications', authenticate, async (req: Request, res: Response) => {
   try {
     const apps = await prisma.jobApplication.findMany({
-      where: { user_id: TEST_USER_ID },
+      where: { user_id: req.user!.id },
       include: { generated_cv: true },
       orderBy: { created_at: 'desc' }
     });
     res.json(apps);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch history' });
-  }
-});
-
-app.get('/api/cv/:jobAppId/html', async (req: Request, res: Response) => {
-  try {
-    const genCv = await prisma.generatedCV.findUnique({
-      where: { job_application_id: req.params.jobAppId },
-      include: { job_application: { include: { user: true } } }
-    });
-
-    if (!genCv) return res.status(404).send('CV not found');
-
-    const profile: any = await prisma.masterProfile.findFirst({
-      where: { user_id: genCv.job_application.user.id }
-    });
-    
-    const tailored = JSON.parse(genCv.tailored_content);
-    profile.experiences = tailored.filtered_experiences;
-    profile.educations = tailored.filtered_educations;
-    profile.skills = tailored.filtered_skills;
-    profile.full_name = genCv.job_application.user.full_name;
-
-    const html = buildCvHtml(profile, genCv.job_application.job_description_text);
-    res.send(html);
-  } catch (error) {
-    console.error("HTML generation error:", error);
-    res.status(500).send('Error generating HTML.');
+    res.status(500).json({ error: 'שגיאה בטעינת ההיסטוריה' });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Smart CV Server running on port ${port}`);
 });
-
