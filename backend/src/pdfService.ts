@@ -18,7 +18,7 @@ export async function generatePdfFromHtml(htmlContent: string): Promise<Buffer> 
 export function buildCvHtml(profile: any, jobDesc: string): string {
   return `
     <!DOCTYPE html>
-    <html lang="he" dir="rtl">
+    <html lang="en" dir="ltr">
     <head>
       <meta charset="UTF-8">
       <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -43,28 +43,28 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
         .item-title { font-weight: bold; font-size: 1.1rem; display: flex; justify-content: space-between; }
         .item-subtitle { color: #666; font-style: italic; }
         .date { color: #888; font-size: 0.9rem; }
-        ul { margin-top: 5px; padding-right: 20px; list-style-type: none; }
+        ul { margin-top: 5px; padding-left: 20px; list-style-type: none; }
         li { margin-bottom: 4px; position: relative; }
-        li::before { content: "•"; color: #4F46E5; margin-left: 8px; }
+        li::before { content: "•"; color: #4F46E5; margin-right: 8px; }
         .skills-container { display: flex; flex-wrap: wrap; gap: 10px; }
         .skill-badge { background: #e0e7ff; color: #4338ca; padding: 4px 10px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; }
       </style>
     </head>
     <body>
       <div class="header">
-        <h1>${profile.full_name || 'ישראל ישראלי'}</h1>
+        <h1>${profile.full_name || 'John Doe'}</h1>
         <div class="contact">
           ${profile.contact_email || ''} | ${profile.phone || ''} | ${profile.location || ''}
         </div>
       </div>
 
       <div>
-        <h2>תקציר מקצועי</h2>
-        <p>${profile.professional_summary || 'איש מקצוע מנוסה.'}</p>
+        <h2>Professional Summary</h2>
+        <p>${profile.professional_summary || 'Experienced Professional.'}</p>
       </div>
 
       <div>
-        <h2>ניסיון תעסוקתי</h2>
+        <h2>Work Experience</h2>
         ${(profile.experiences || []).map((exp: any) => {
           let tasks = [];
           try { tasks = JSON.parse(exp.responsibilities || '[]'); } catch(e){}
@@ -74,7 +74,7 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
           <div class="item">
             <div class="item-title">
               <span>${exp.role} - ${exp.company}</span>
-              <span class="date">${new Date(exp.start_date).getFullYear()} - ${exp.end_date ? new Date(exp.end_date).getFullYear() : 'היום'}</span>
+              <span class="date">${new Date(exp.start_date).getFullYear()} - ${exp.end_date ? new Date(exp.end_date).getFullYear() : 'Present'}</span>
             </div>
             <p style="margin: 5px 0 0;">${exp.description || ''}</p>
             <ul>
@@ -87,12 +87,12 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
 
       ${profile.educations && profile.educations.length > 0 ? `
       <div>
-        <h2>השכלה</h2>
+        <h2>Education</h2>
         ${profile.educations.map((edu: any) => `
         <div class="item">
           <div class="item-title">
             <span>${edu.degree} - ${edu.institution}</span>
-            <span class="date">${new Date(edu.start_date).getFullYear()} - ${edu.end_date ? new Date(edu.end_date).getFullYear() : 'היום'}</span>
+            <span class="date">${new Date(edu.start_date).getFullYear()} - ${edu.end_date ? new Date(edu.end_date).getFullYear() : 'Present'}</span>
           </div>
         </div>
         `).join('')}
@@ -100,7 +100,7 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
       ` : ''}
 
       <div>
-        <h2>כישורים</h2>
+        <h2>Skills</h2>
         <div class="skills-container">
           ${(profile.skills || []).map((s: any) => `<span class="skill-badge">${s.name}</span>`).join('')}
         </div>

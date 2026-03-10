@@ -22,12 +22,12 @@ const History = () => {
   }, []);
 
   return (
-    <div className="animate-fade-in" style={{ direction: 'rtl' }}>
+    <div className="animate-fade-in" style={{ direction: 'ltr' }}>
       <div style={{ marginBottom: '2rem' }}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <HistoryIcon size={32} color="#818cf8" /> היסטוריית הגשות
+          <HistoryIcon size={32} color="#818cf8" /> Application History
         </h1>
-        <p>צפה בכל קורות החיים שיצרת, הורד מחדש או עיין בתצוגה מקדימה.</p>
+        <p>View all the CVs you've generated, download them again, or preview them.</p>
       </div>
 
       {isLoading ? (
@@ -37,13 +37,13 @@ const History = () => {
             borderTop: '3px solid #818cf8', borderRadius: '50%',
             animation: 'spin 0.8s linear infinite', margin: '0 auto 1rem'
           }} />
-          טוען היסטוריה...
+          Loading history...
         </div>
       ) : applications.length === 0 ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '4rem' }}>
           <FileText size={48} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
-          <h3 style={{ color: 'var(--text-muted)' }}>אין עדיין הגשות</h3>
-          <p style={{ marginBottom: 0 }}>עדיין לא יצרת קורות חיים. עבור ל"הגש משרה" כדי להתחיל.</p>
+          <h3 style={{ color: 'var(--text-muted)' }}>No applications yet</h3>
+          <p style={{ marginBottom: 0 }}>You haven't generated any CVs yet. Go to "Apply for Role" to get started.</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
@@ -56,10 +56,10 @@ const History = () => {
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                   <Calendar size={13} />
-                  {new Date(app.created_at).toLocaleDateString('he-IL', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  {new Date(app.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
                   {app.generated_cv && (
-                    <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', padding: '0.15rem 0.6rem', borderRadius: '20px', fontSize: '0.78rem', marginRight: '0.5rem' }}>
-                      קו"ח נוצרו
+                    <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', padding: '0.15rem 0.6rem', borderRadius: '20px', fontSize: '0.78rem', marginLeft: '0.5rem' }}>
+                      CV Generated
                     </span>
                   )}
                 </div>
@@ -72,7 +72,7 @@ const History = () => {
                     className="btn btn-secondary"
                     style={{ padding: '0.55rem 1rem', fontSize: '0.9rem' }}
                   >
-                    <Eye size={16} /> תצוגה
+                    <Eye size={16} /> Preview
                   </button>
                   <a
                     href={getPdfDownloadUrl(app.id)}
@@ -122,7 +122,7 @@ const History = () => {
                   className="btn btn-primary"
                   style={{ padding: '0.55rem 1.1rem', fontSize: '0.9rem', textDecoration: 'none' }}
                 >
-                  <Download size={16} /> הורד PDF
+                  <Download size={16} /> Download PDF
                 </a>
                 <button onClick={() => setPreviewApp(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.25rem' }}>
                   <X size={22} />

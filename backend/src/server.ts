@@ -37,7 +37,7 @@ const authenticate = (req: Request, res: Response, next: NextFunction): void => 
   const token = (authHeader && authHeader.split(' ')[1]) || queryToken;
 
   if (!token) {
-    res.status(401).json({ error: 'נדרש אימות. אנא התחבר מחדש.' });
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
     return;
   }
 
@@ -46,7 +46,7 @@ const authenticate = (req: Request, res: Response, next: NextFunction): void => 
     req.user = decoded;
     next();
   } catch {
-    res.status(403).json({ error: 'טוקן לא תקין, אנא התחבר מחדש.' });
+    res.status(403).json({ error: 'Invalid token, please log in again.' });
   }
 };
 
@@ -65,18 +65,18 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     const { email, password, full_name } = req.body;
 
     if (!email || !password || !full_name) {
-      res.status(400).json({ error: 'נא למלא את כל השדות' });
+      res.status(400).json({ error: 'Please fill in all fields' });
       return;
     }
 
     if (password.length < 6) {
-      res.status(400).json({ error: 'הסיסמה חייבת להכיל לפחות 6 תווים' });
+      res.status(400).json({ error: 'Password must be at least 6 characters long' });
       return;
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      res.status(409).json({ error: 'כתובת האימייל כבר רשומה במערכת' });
+      res.status(409).json({ error: 'Email address is already registered' });
       return;
     }
 
@@ -98,7 +98,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ error: 'שגיאה בהרשמה, נסה שוב' });
+    res.status(500).json({ error: 'Registration error, please try again' });
   }
 });
 
@@ -107,19 +107,19 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      res.status(400).json({ error: 'נא למלא אימייל וסיסמה' });
+      res.status(400).json({ error: 'Please enter your email and password' });
       return;
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      res.status(401).json({ error: 'Incorrect email or password' });
       return;
     }
 
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      res.status(401).json({ error: 'Incorrect email or password' });
       return;
     }
 
@@ -131,7 +131,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'שגיאה בהתחברות, נסה שוב' });
+    res.status(500).json({ error: 'Login error, please try again' });
   }
 });
 
@@ -151,7 +151,7 @@ app.get('/api/master-profile', authenticate, async (req: Request, res: Response)
     });
     res.json(profile);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בטעינת הפרופיל' });
+    res.status(500).json({ error: 'Error loading profile' });
   }
 });
 
@@ -161,7 +161,7 @@ app.put('/api/master-profile', authenticate, async (req: Request, res: Response)
 
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
-      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      res.status(404).json({ error: 'Profile not found' });
       return;
     }
 
@@ -180,7 +180,7 @@ app.put('/api/master-profile', authenticate, async (req: Request, res: Response)
 
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בשמירת הפרופיל' });
+    res.status(500).json({ error: 'Error saving profile' });
   }
 });
 
@@ -190,7 +190,7 @@ app.post('/api/master-profile/experience', authenticate, async (req: Request, re
 
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
-      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      res.status(404).json({ error: 'Profile not found' });
       return;
     }
 
@@ -208,7 +208,7 @@ app.post('/api/master-profile/experience', authenticate, async (req: Request, re
 
     res.json(exp);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בהוספת ניסיון' });
+    res.status(500).json({ error: 'Error adding experience' });
   }
 });
 
@@ -217,7 +217,7 @@ app.delete('/api/master-profile/experience/:id', authenticate, async (req: Reque
     await prisma.experience.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה במחיקת ניסיון' });
+    res.status(500).json({ error: 'Error deleting experience' });
   }
 });
 
@@ -226,7 +226,7 @@ app.post('/api/master-profile/skill', authenticate, async (req: Request, res: Re
     const { name, category } = req.body;
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
-      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      res.status(404).json({ error: 'Profile not found' });
       return;
     }
 
@@ -235,7 +235,7 @@ app.post('/api/master-profile/skill', authenticate, async (req: Request, res: Re
     });
     res.json(skill);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בהוספת כישור' });
+    res.status(500).json({ error: 'Error adding skill' });
   }
 });
 
@@ -244,7 +244,7 @@ app.delete('/api/master-profile/skill/:id', authenticate, async (req: Request, r
     await prisma.skill.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה במחיקת כישור' });
+    res.status(500).json({ error: 'Error deleting skill' });
   }
 });
 
@@ -253,7 +253,7 @@ app.post('/api/master-profile/education', authenticate, async (req: Request, res
     const { institution, degree, start_date, end_date } = req.body;
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
-      res.status(404).json({ error: 'פרופיל לא נמצא' });
+      res.status(404).json({ error: 'Profile not found' });
       return;
     }
 
@@ -268,7 +268,7 @@ app.post('/api/master-profile/education', authenticate, async (req: Request, res
     });
     res.json(edu);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בהוספת השכלה' });
+    res.status(500).json({ error: 'Error adding education' });
   }
 });
 
@@ -277,7 +277,7 @@ app.delete('/api/master-profile/education/:id', authenticate, async (req: Reques
     await prisma.education.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה במחיקת השכלה' });
+    res.status(500).json({ error: 'Error deleting education' });
   }
 });
 
@@ -296,7 +296,7 @@ app.post('/api/generate-cv', authenticate, async (req: Request, res: Response) =
     const safeProfile = profile || { skills: [], experiences: [], educations: [] };
 
     let tailoredContent: any = {
-      message: 'תוכן מותאם על ידי Google Gemini AI.',
+      message: 'Content tailored by Google Gemini AI.',
       filtered_skills: (safeProfile as any).skills || [],
       filtered_experiences: (safeProfile as any).experiences || [],
       filtered_educations: (safeProfile as any).educations || []
@@ -387,8 +387,8 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
     const jobApp = await prisma.jobApplication.create({
       data: {
         user_id: req.user!.id,
-        job_title: job_title || 'תפקיד לא מוגדר',
-        company_name: company_name || 'חברה לא מוגדרת',
+        job_title: job_title || 'Unspecified Role',
+        company_name: company_name || 'Unspecified Company',
         job_description_text: job_description_text
       }
     });
@@ -404,7 +404,7 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
     res.json({ ...genCv, job_application_id: jobApp.id });
   } catch (error) {
     console.error('CV generation error:', error);
-    res.status(500).json({ error: 'שגיאה ביצירת קורות חיים. וודא שמילאת מידע בפרופיל.' });
+    res.status(500).json({ error: 'Error generating CV. Ensure you have filled out your profile info.' });
   }
 });
 
@@ -439,7 +439,7 @@ async function buildCvData(jobAppId: string) {
 app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Response) => {
   try {
     const data = await buildCvData(String(req.params.jobAppId));
-    if (!data) { res.status(404).send('קורות חיים לא נמצאו'); return; }
+    if (!data) { res.status(404).send('CV not found'); return; }
 
     const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
     const pdfBuffer = await generatePdfFromHtml(html);
@@ -449,20 +449,20 @@ app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Respons
     res.send(pdfBuffer);
   } catch (error) {
     console.error('PDF generation error:', error);
-    res.status(500).send('שגיאה ביצירת ה-PDF.');
+    res.status(500).send('Error generating PDF.');
   }
 });
 
 app.get('/api/cv/:jobAppId/html', authenticate, async (req: Request, res: Response) => {
   try {
     const data = await buildCvData(String(req.params.jobAppId));
-    if (!data) { res.status(404).send('קורות חיים לא נמצאו'); return; }
+    if (!data) { res.status(404).send('CV not found'); return; }
 
     const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
     res.send(html);
   } catch (error) {
     console.error('HTML preview error:', error);
-    res.status(500).send('שגיאה ביצירת תצוגה מקדימה.');
+    res.status(500).send('Error generating preview.');
   }
 });
 
@@ -478,7 +478,7 @@ app.get('/api/applications', authenticate, async (req: Request, res: Response) =
     });
     res.json(apps);
   } catch (error) {
-    res.status(500).json({ error: 'שגיאה בטעינת ההיסטוריה' });
+    res.status(500).json({ error: 'Error loading history' });
   }
 });
 

@@ -18,10 +18,10 @@ const Login = () => {
     setIsLoading(true);
     try {
       await login(email, password);
-      showToast('ברוך הבא! התחברת בהצלחה.', 'success');
+      showToast('Welcome back! Logged in successfully.', 'success');
       navigate('/');
     } catch (err) {
-      showToast(err.response?.data?.error || 'שגיאה בהתחברות, נסה שוב.', 'error');
+      showToast(err.response?.data?.error || 'Login failed, please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -37,14 +37,14 @@ const Login = () => {
           <span className="brand-gradient">Smart CV</span>
         </div>
 
-        <h2 style={{ textAlign: 'center', marginBottom: '0.25rem', fontSize: '1.5rem' }}>התחברות</h2>
+        <h2 style={{ textAlign: 'center', marginBottom: '0.25rem', fontSize: '1.5rem' }}>Login</h2>
         <p style={{ textAlign: 'center', marginBottom: '2rem', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          ברוך הבא! אנא התחבר לחשבון שלך
+          Welcome back! Please log in to your account
         </p>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }} dir="rtl">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }} dir="ltr">
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">כתובת אימייל</label>
+            <label className="form-label">Email Address</label>
             <input
               type="email"
               className="form-input"
@@ -59,7 +59,7 @@ const Login = () => {
           </div>
 
           <div className="form-group" style={{ marginBottom: 0, position: 'relative' }}>
-            <label className="form-label">סיסמה</label>
+            <label className="form-label">Password</label>
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -70,13 +70,13 @@ const Login = () => {
                 placeholder="••••••••"
                 autoComplete="current-password"
                 dir="ltr"
-                style={{ textAlign: 'left', paddingLeft: '2.5rem' }}
+                style={{ textAlign: 'left', paddingRight: '2.5rem' }}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 style={{
-                  position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)',
+                  position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)',
                   background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0
                 }}
               >
@@ -92,16 +92,16 @@ const Login = () => {
             disabled={isLoading}
           >
             {isLoading
-              ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> מתחבר...</>
-              : <><LogIn size={18} /> התחבר</>
+              ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Logging in...</>
+              : <><LogIn size={18} /> Login</>
             }
           </button>
         </form>
 
         <p style={{ textAlign: 'center', marginTop: '1.75rem', marginBottom: 0, color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          אין לך חשבון?{' '}
+          Don't have an account?{' '}
           <Link to="/register" style={{ color: '#818cf8', textDecoration: 'none', fontWeight: 600 }}>
-            הירשם עכשיו
+            Register now
           </Link>
         </p>
       </div>

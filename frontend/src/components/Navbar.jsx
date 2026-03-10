@@ -12,7 +12,7 @@ const Navbar = () => {
 
   const handleLogout = () => {
     logout();
-    showToast('התנתקת בהצלחה.', 'info');
+    showToast('Logged out successfully.', 'info');
     navigate('/login');
     setShowUserMenu(false);
   };
@@ -38,21 +38,21 @@ const Navbar = () => {
             className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
             style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <User size={17} /> פרופיל
+            <User size={17} /> Profile
           </NavLink>
           <NavLink
             to="/job"
             className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
             style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <Sparkles size={17} /> הגש משרה
+            <Sparkles size={17} /> Apply for Role
           </NavLink>
           <NavLink
             to="/history"
             className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
             style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <HistoryIcon size={17} /> היסטוריה
+            <HistoryIcon size={17} /> History
           </NavLink>
         </div>
 
@@ -78,7 +78,7 @@ const Navbar = () => {
               {initials}
             </div>
             <span style={{ fontSize: '0.9rem', fontWeight: 500, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user?.full_name || 'משתמש'}
+              {user?.full_name || 'User'}
             </span>
             <ChevronDown size={15} style={{ opacity: 0.6, transition: 'transform 0.2s', transform: showUserMenu ? 'rotate(180deg)' : 'none' }} />
           </button>
@@ -97,7 +97,7 @@ const Navbar = () => {
                 boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
               }}>
                 <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--surface-border)', marginBottom: '0.5rem' }}>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>מחובר כ:</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>Logged in as:</p>
                   <p style={{ margin: '0.2rem 0 0', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-main)' }}>
                     {user?.email}
                   </p>
@@ -113,7 +113,7 @@ const Navbar = () => {
                   onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <LogOut size={16} /> התנתק
+                  <LogOut size={16} /> Logout
                 </button>
               </div>
             </>

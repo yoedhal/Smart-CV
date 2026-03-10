@@ -19,22 +19,22 @@ const Register = () => {
     e.preventDefault();
 
     if (password !== confirmPassword) {
-      showToast('הסיסמאות אינן תואמות', 'error');
+      showToast('Passwords do not match', 'error');
       return;
     }
 
     if (password.length < 6) {
-      showToast('הסיסמה חייבת להכיל לפחות 6 תווים', 'error');
+      showToast('Password must be at least 6 characters long', 'error');
       return;
     }
 
     setIsLoading(true);
     try {
       await register(email, password, fullName);
-      showToast(`ברוך הבא, ${fullName}! החשבון נוצר בהצלחה.`, 'success');
+      showToast(`Welcome, ${fullName}! Your account has been created.`, 'success');
       navigate('/');
     } catch (err) {
-      showToast(err.response?.data?.error || 'שגיאה בהרשמה, נסה שוב.', 'error');
+      showToast(err.response?.data?.error || 'Registration failed, please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -50,27 +50,27 @@ const Register = () => {
           <span className="brand-gradient">Smart CV</span>
         </div>
 
-        <h2 style={{ textAlign: 'center', marginBottom: '0.25rem', fontSize: '1.5rem' }}>יצירת חשבון</h2>
+        <h2 style={{ textAlign: 'center', marginBottom: '0.25rem', fontSize: '1.5rem' }}>Create Account</h2>
         <p style={{ textAlign: 'center', marginBottom: '2rem', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          הצטרף ותתחיל לבנות קורות חיים חכמים
+          Join us and start building smart CVs
         </p>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }} dir="rtl">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }} dir="ltr">
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">שם מלא</label>
+            <label className="form-label">Full Name</label>
             <input
               type="text"
               className="form-input"
               value={fullName}
               onChange={e => setFullName(e.target.value)}
               required
-              placeholder="ישראל ישראלי"
+              placeholder="John Doe"
               autoComplete="name"
             />
           </div>
 
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">כתובת אימייל</label>
+            <label className="form-label">Email Address</label>
             <input
               type="email"
               className="form-input"
@@ -85,7 +85,7 @@ const Register = () => {
           </div>
 
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">סיסמה (לפחות 6 תווים)</label>
+            <label className="form-label">Password (Min 6 characters)</label>
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -95,13 +95,13 @@ const Register = () => {
                 required
                 placeholder="••••••••"
                 dir="ltr"
-                style={{ textAlign: 'left', paddingLeft: '2.5rem' }}
+                style={{ textAlign: 'left', paddingRight: '2.5rem' }}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 style={{
-                  position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)',
+                  position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)',
                   background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0
                 }}
               >
@@ -111,7 +111,7 @@ const Register = () => {
           </div>
 
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">אימות סיסמה</label>
+            <label className="form-label">Confirm Password</label>
             <input
               type={showPassword ? 'text' : 'password'}
               className="form-input"
@@ -131,16 +131,16 @@ const Register = () => {
             disabled={isLoading}
           >
             {isLoading
-              ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> יוצר חשבון...</>
-              : <><UserPlus size={18} /> צור חשבון</>
+              ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Creating account...</>
+              : <><UserPlus size={18} /> Register</>
             }
           </button>
         </form>
 
         <p style={{ textAlign: 'center', marginTop: '1.75rem', marginBottom: 0, color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          כבר יש לך חשבון?{' '}
+          Already have an account?{' '}
           <Link to="/login" style={{ color: '#818cf8', textDecoration: 'none', fontWeight: 600 }}>
-            התחבר כאן
+            Login here
           </Link>
         </p>
       </div>

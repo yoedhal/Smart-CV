@@ -23,7 +23,7 @@ const PrivateRoute = ({ children }) => {
           borderTop: '3px solid #818cf8', borderRadius: '50%',
           animation: 'spin 0.8s linear infinite'
         }} />
-        <p style={{ color: 'var(--text-muted)' }}>טוען...</p>
+        <p style={{ color: 'var(--text-muted)' }}>Loading...</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );

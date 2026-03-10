@@ -20,18 +20,18 @@ const JobSearch = () => {
 
     try {
       const result = await generateCV({
-        job_title: jobTitle || 'תפקיד לא מוגדר',
-        company_name: companyName || 'חברה לא מוגדרת',
+        job_title: jobTitle || 'Unspecified Role',
+        company_name: companyName || 'Unspecified Company',
         job_description_text: jobDescription
       });
 
       // Use job_application_id - this is what the PDF/HTML routes expect
       const jobAppId = result.job_application_id;
       setGeneratedJobAppId(jobAppId);
-      showToast('קורות החיים נוצרו בהצלחה!', 'success');
+      showToast('CV generated successfully!', 'success');
     } catch (err) {
       console.error('Generation failed:', err);
-      const msg = err.response?.data?.error || 'שגיאה ביצירת קורות החיים. ודא שמילאת מידע בפרופיל המאסטר.';
+      const msg = err.response?.data?.error || 'Error generating CV. Please ensure your Master Profile is complete.';
       setError(msg);
       showToast(msg, 'error');
     } finally {
@@ -49,15 +49,15 @@ const JobSearch = () => {
   };
 
   return (
-    <div className="animate-fade-in" style={{ maxWidth: '1100px', margin: '0 auto', width: '100%', direction: 'rtl' }}>
+    <div className="animate-fade-in" style={{ maxWidth: '1100px', margin: '0 auto', width: '100%', direction: 'ltr' }}>
 
       <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
         <h1 style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem' }}>
           <Sparkles size={36} color="#c084fc" />
-          התאמת קורות חיים למשרה
+          Tailor CV to Job
         </h1>
         <p style={{ fontSize: '1.05rem', maxWidth: '600px', margin: '0 auto' }}>
-          הדבק את תיאור המשרה. ה-AI יסנן ויתאים את ניסיונך ומיומנויותיך עבורה.
+          Paste the job description. The AI will filter and adapt your experience and skills for it.
         </p>
       </div>
 
@@ -76,21 +76,21 @@ const JobSearch = () => {
         <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">שם התפקיד</label>
+              <label className="form-label">Job Title</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="למשל: מפתח Full Stack בכיר"
+                placeholder="e.g. Senior Full Stack Developer"
                 value={jobTitle}
                 onChange={e => setJobTitle(e.target.value)}
               />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">שם החברה</label>
+              <label className="form-label">Company Name</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="למשל: Google"
+                placeholder="e.g. Google"
                 value={companyName}
                 onChange={e => setCompanyName(e.target.value)}
               />
@@ -99,12 +99,12 @@ const JobSearch = () => {
 
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label" style={{ fontSize: '1rem', color: 'var(--text-main)', marginBottom: '0.6rem' }}>
-              תיאור המשרה *
+              Job Description *
             </label>
             <textarea
               className="form-textarea"
               style={{ minHeight: '220px' }}
-              placeholder="הדבק כאן את דרישות המשרה או תיאור התפקיד המלא. ככל שתדייק יותר — ה-AI יוכל לסנן טוב יותר..."
+              placeholder="Paste the full job requirements or description here. The more detail, the better the AI can tailor..."
               value={jobDescription}
               onChange={e => setJobDescription(e.target.value)}
             />
@@ -117,8 +117,8 @@ const JobSearch = () => {
             disabled={isGenerating || !jobDescription.trim()}
           >
             {isGenerating
-              ? <><Loader2 size={22} style={{ animation: 'spin 0.8s linear infinite' }} /> מעבד עם AI... זה לוקח כמה שניות</>
-              : <><Sparkles size={22} /> צור קורות חיים מותאמים</>
+              ? <><Loader2 size={22} style={{ animation: 'spin 0.8s linear infinite' }} /> Processing with AI... This takes a few seconds</>
+              : <><Sparkles size={22} /> Create Tailored CV</>
             }
           </button>
         </section>
@@ -136,9 +136,9 @@ const JobSearch = () => {
             </div>
 
             <div>
-              <h2 style={{ marginBottom: '0.4rem' }}>הקו"ח מוכנים!</h2>
+              <h2 style={{ marginBottom: '0.4rem' }}>CV Ready!</h2>
               <p style={{ marginBottom: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                ה-AI ניתח את המשרה וסינן את הניסיון הרלוונטי עבורך.
+                The AI analyzed the job and filtered relevant experience.
               </p>
             </div>
 
@@ -148,7 +148,7 @@ const JobSearch = () => {
                 style={{ width: '100%' }}
                 onClick={() => setPreviewOpen(!previewOpen)}
               >
-                <Eye size={18} /> {previewOpen ? 'סגור תצוגה' : 'תצוגה מקדימה'}
+                <Eye size={18} /> {previewOpen ? 'Close Preview' : 'Preview CV'}
               </button>
               <a
                 href={getPdfDownloadUrl(generatedJobAppId)}
@@ -157,20 +157,20 @@ const JobSearch = () => {
                 className="btn btn-primary"
                 style={{ width: '100%', textDecoration: 'none' }}
               >
-                <Download size={18} /> הורד PDF
+                <Download size={18} /> Download PDF
               </a>
               <button className="btn btn-secondary" style={{ width: '100%' }} onClick={handleReset}>
-                <RotateCcw size={18} /> צור קו"ח חדשים
+                <RotateCcw size={18} /> Start New CV
               </button>
             </div>
           </div>
 
           {/* Right: Preview */}
-          <div className="glass-panel" style={{ padding: '1rem', height: '80vh', display: previewOpen ? 'flex' : 'flex', flexDirection: 'column' }}>
+          <div className="glass-panel" style={{ padding: '1rem', height: '80vh', display: 'flex', flexDirection: 'column' }}>
             {previewOpen ? (
               <>
                 <h3 style={{ marginBottom: '0.75rem', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
-                  <Sparkles size={18} /> תצוגה מקדימה — AI Optimized
+                  <Sparkles size={18} /> Preview — AI Optimized
                 </h3>
                 <iframe
                   src={getHtmlPreviewUrl(generatedJobAppId)}
@@ -181,7 +181,7 @@ const JobSearch = () => {
             ) : (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem', color: 'var(--text-muted)' }}>
                 <Eye size={48} style={{ opacity: 0.3 }} />
-                <p style={{ margin: 0, textAlign: 'center' }}>לחץ על "תצוגה מקדימה" כדי לראות את קורות החיים</p>
+                <p style={{ margin: 0, textAlign: 'center' }}>Click "Preview CV" to see the results</p>
               </div>
             )}
           </div>
