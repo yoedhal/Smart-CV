@@ -28,6 +28,7 @@ const JobSearch = () => {
       // Use job_application_id - this is what the PDF/HTML routes expect
       const jobAppId = result.job_application_id;
       setGeneratedJobAppId(jobAppId);
+      setPreviewOpen(true);
       showToast('CV generated successfully!', 'success');
     } catch (err) {
       console.error('Generation failed:', err);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, User, Briefcase, GraduationCap, CheckCircle, Trash2, X, Info, MapPin, Linkedin } from 'lucide-react';
-import { getMasterProfile, updateMasterProfile, addExperience, deleteExperience, addEducation, deleteEducation, addSkill, deleteSkill } from '../services/api';
+import { Plus, User, Briefcase, GraduationCap, CheckCircle, Trash2, X, Info, MapPin, Linkedin, Upload, Loader2 } from 'lucide-react';
+import { getMasterProfile, updateMasterProfile, addExperience, deleteExperience, addEducation, deleteEducation, addSkill, deleteSkill, parseCvText } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -23,6 +23,11 @@ const Dashboard = () => {
   const [newEdu, setNewEdu] = useState({ institution: '', degree: '', start_date: '', end_date: '' });
 
   const [newSkill, setNewSkill] = useState('');
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [isParsing, setIsParsing] = useState(false);
+  const [parsedData, setParsedData] = useState(null);
 
   const fetchProfile = async () => {
     try {
@@ -153,15 +158,93 @@ const Dashboard = () => {
     }
   };
 
+  const handleParseCV = async () => {
+    if (!importText.trim()) return;
+    setIsParsing(true);
+    try {
+      const data = await parseCvText(importText);
+      setParsedData(data);
+      showToast('CV parsed! Review the data below and click "Apply to Profile".', 'success');
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to parse CV. Try again.', 'error');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleApplyParsed = async () => {
+    if (!parsedData) return;
+    setIsParsing(true);
+    try {
+      // Save personal info
+      const profileUpdate = {
+        full_name: parsedData.full_name || profile.fullName,
+        contact_email: parsedData.contact_email || profile.email,
+        phone: parsedData.phone || profile.phone,
+        location: parsedData.location || profile.location,
+        linkedin_url: parsedData.linkedin_url || profile.linkedin_url,
+        professional_summary: parsedData.professional_summary || profile.professionalSummary
+      };
+      await updateMasterProfile(profileUpdate);
+
+      // Add skills
+      const skillPromises = (parsedData.skills || []).slice(0, 30).map(name =>
+        addSkill({ name: String(name).trim(), category: 'General' }).catch(() => null)
+      );
+
+      // Add experiences
+      const expPromises = (parsedData.experiences || []).slice(0, 10).map(exp =>
+        addExperience({
+          company: exp.company,
+          role: exp.role,
+          start_date: exp.start_date || '2020-01-01',
+          end_date: exp.end_date || null,
+          description: exp.description || '',
+          responsibilities: Array.isArray(exp.responsibilities) ? exp.responsibilities : []
+        }).catch(() => null)
+      );
+
+      // Add educations
+      const eduPromises = (parsedData.educations || []).slice(0, 5).map(edu =>
+        addEducation({
+          institution: edu.institution,
+          degree: edu.degree,
+          start_date: edu.start_date || '2010-01-01',
+          end_date: edu.end_date || null
+        }).catch(() => null)
+      );
+
+      await Promise.all([...skillPromises, ...expPromises, ...eduPromises]);
+      await fetchProfile();
+      setShowImportModal(false);
+      setImportText('');
+      setParsedData(null);
+      showToast('Profile populated from CV!', 'success');
+    } catch (err) {
+      showToast('Error applying parsed data', 'error');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
   const isProfileReady = experiences.length > 0 && skills.length > 0;
 
   return (
     <div className="animate-fade-in" style={{ display: 'grid', gap: '2rem', gridTemplateColumns: 'minmax(0, 1fr) 280px', direction: 'ltr' }}>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <User size={32} color="#818cf8" /> Master Profile
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <User size={32} color="#818cf8" /> Master Profile
+          </h1>
+          <button
+            className="btn btn-secondary"
+            onClick={() => { setShowImportModal(true); setParsedData(null); setImportText(''); }}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          >
+            <Upload size={18} /> Import from CV
+          </button>
+        </div>
 
         <div style={{ background: 'rgba(59, 130, 246, 0.08)', padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
           <Info size={20} color="#3b82f6" style={{ flexShrink: 0, marginTop: '2px' }} />
@@ -367,6 +450,82 @@ const Dashboard = () => {
           )}
         </section>
       </div>
+
+      {/* Import CV Modal */}
+      {showImportModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', overflow: 'auto', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Upload size={22} color="#818cf8" /> Import from Existing CV
+              </h2>
+              <button onClick={() => setShowImportModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={22} />
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+              Paste the text of your existing CV. The AI will extract your details and populate your profile automatically.
+            </p>
+
+            {!parsedData ? (
+              <>
+                <textarea
+                  className="form-textarea"
+                  style={{ minHeight: '260px', marginBottom: '1rem' }}
+                  placeholder="Paste your CV text here..."
+                  value={importText}
+                  onChange={e => setImportText(e.target.value)}
+                />
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%' }}
+                  onClick={handleParseCV}
+                  disabled={isParsing || !importText.trim()}
+                >
+                  {isParsing
+                    ? <><Loader2 size={18} style={{ animation: 'spin 0.8s linear infinite' }} /> Parsing with AI...</>
+                    : <><Upload size={18} /> Parse CV</>}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '1rem', marginBottom: '1rem' }}>
+                  <p style={{ margin: '0 0 0.75rem', fontWeight: 600, color: 'var(--secondary)' }}>AI found the following data:</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.875rem' }}>
+                    {parsedData.full_name && <span><strong>Name:</strong> {parsedData.full_name}</span>}
+                    {parsedData.contact_email && <span><strong>Email:</strong> {parsedData.contact_email}</span>}
+                    {parsedData.phone && <span><strong>Phone:</strong> {parsedData.phone}</span>}
+                    {parsedData.location && <span><strong>Location:</strong> {parsedData.location}</span>}
+                  </div>
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.875rem' }}>
+                    <span><strong>Skills:</strong> {(parsedData.skills || []).length}</span>
+                    {' · '}
+                    <span><strong>Experiences:</strong> {(parsedData.experiences || []).length}</span>
+                    {' · '}
+                    <span><strong>Education:</strong> {(parsedData.educations || []).length}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setParsedData(null)} disabled={isParsing}>
+                    Back
+                  </button>
+                  <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleApplyParsed} disabled={isParsing}>
+                    {isParsing
+                      ? <><Loader2 size={18} style={{ animation: 'spin 0.8s linear infinite' }} /> Applying...</>
+                      : 'Apply to Profile'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
 
       {/* Sidebar */}
       <div>

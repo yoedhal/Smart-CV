@@ -66,6 +66,11 @@ export const deleteSkill = async (id) => {
   return response.data;
 };
 
+export const parseCvText = async (cvText) => {
+  const response = await api.post('/master-profile/parse-cv', { cv_text: cvText });
+  return response.data;
+};
+
 export const generateCV = async (data) => {
   const response = await api.post('/generate-cv', data);
   return response.data;

@@ -396,6 +396,78 @@ app.delete('/api/master-profile/education/:id', authenticate, async (req: Reques
 });
 
 // ──────────────────────────────────────────────
+// Parse existing CV text into profile structure
+// ──────────────────────────────────────────────
+app.post('/api/master-profile/parse-cv', authenticate, async (req: Request, res: Response) => {
+  try {
+    const cvText = sanitizeString(req.body.cv_text, 15000);
+    if (!cvText || cvText.length < 50) {
+      res.status(400).json({ error: 'Please provide CV text (at least 50 characters)' });
+      return;
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      res.status(503).json({ error: 'AI service not configured' });
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const systemPrompt = `You are an expert CV parser. Extract structured data from the CV text provided.
+Return ONLY a strict JSON object with these fields (use null for missing values):
+{
+  "full_name": string,
+  "contact_email": string | null,
+  "phone": string | null,
+  "location": string | null,
+  "linkedin_url": string | null,
+  "professional_summary": string | null,
+  "skills": string[],
+  "experiences": [
+    {
+      "company": string,
+      "role": string,
+      "start_date": "YYYY-MM-DD" | null,
+      "end_date": "YYYY-MM-DD" | null,
+      "description": string | null,
+      "responsibilities": string[]
+    }
+  ],
+  "educations": [
+    {
+      "institution": string,
+      "degree": string,
+      "start_date": "YYYY-MM-DD" | null,
+      "end_date": "YYYY-MM-DD" | null
+    }
+  ]
+}
+No explanations, no markdown, just raw JSON.`;
+
+    const result = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: `Parse this CV:\n\n${cvText}`,
+        config: { systemInstruction: systemPrompt }
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini timeout')), 30000)
+      )
+    ]);
+
+    const raw = (result as any).text || '';
+    const cleanJson = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(cleanJson);
+
+    res.json(parsed);
+  } catch (error) {
+    console.error('CV parse error:', error);
+    res.status(500).json({ error: 'Failed to parse CV. Please check the text and try again.' });
+  }
+});
+
+// ──────────────────────────────────────────────
 // AI CV Generation
 // ──────────────────────────────────────────────
 const MAX_JOB_DESC_LENGTH = 10000;
