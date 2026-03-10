@@ -1,21 +1,53 @@
-import puppeteer from 'puppeteer';
+import puppeteer, { Browser } from 'puppeteer';
+
+// ── Singleton browser instance (avoids ~2s startup per PDF) ─────────────────
+let browserInstance: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (browserInstance && browserInstance.connected) {
+    return browserInstance;
+  }
+  browserInstance = await puppeteer.launch({ headless: true });
+  return browserInstance;
+}
+
+export async function closeBrowser(): Promise<void> {
+  if (browserInstance) {
+    await browserInstance.close();
+    browserInstance = null;
+  }
+}
 
 export async function generatePdfFromHtml(htmlContent: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await getBrowser();
   const page = await browser.newPage();
-  
-  await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-  const pdfBuffer = await page.pdf({
-    format: 'A4',
-    printBackground: true,
-    margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
-  });
 
-  await browser.close();
-  return Buffer.from(pdfBuffer);
+  try {
+    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
+    });
+    return Buffer.from(pdfBuffer);
+  } finally {
+    await page.close();
+  }
 }
 
 export function buildCvHtml(profile: any, jobDesc: string): string {
+  const escapeHtml = (str: string) =>
+    String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const formatYear = (date: string | Date | null): string => {
+    if (!date) return 'Present';
+    try { return new Date(date).getFullYear().toString(); } catch { return 'Present'; }
+  };
+
   return `
     <!DOCTYPE html>
     <html lang="en" dir="ltr">
@@ -52,34 +84,36 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
     </head>
     <body>
       <div class="header">
-        <h1>${profile.full_name || 'John Doe'}</h1>
+        <h1>${escapeHtml(profile.full_name || 'John Doe')}</h1>
         <div class="contact">
-          ${profile.contact_email || ''} | ${profile.phone || ''} | ${profile.location || ''}
+          ${[profile.contact_email, profile.phone, profile.location].filter(Boolean).map(escapeHtml).join(' | ')}
         </div>
       </div>
 
       <div>
         <h2>Professional Summary</h2>
-        <p>${profile.professional_summary || 'Experienced Professional.'}</p>
+        <p>${escapeHtml(profile.professional_summary || 'Experienced Professional.')}</p>
       </div>
 
       <div>
         <h2>Work Experience</h2>
         ${(profile.experiences || []).map((exp: any) => {
-          let tasks = [];
-          try { tasks = JSON.parse(exp.responsibilities || '[]'); } catch(e){}
-          if (!Array.isArray(tasks)) tasks = [];
-          
+          let tasks: string[] = [];
+          try {
+            const parsed = typeof exp.responsibilities === 'string'
+              ? JSON.parse(exp.responsibilities)
+              : exp.responsibilities;
+            tasks = Array.isArray(parsed) ? parsed : [];
+          } catch { tasks = []; }
+
           return `
           <div class="item">
             <div class="item-title">
-              <span>${exp.role} - ${exp.company}</span>
-              <span class="date">${new Date(exp.start_date).getFullYear()} - ${exp.end_date ? new Date(exp.end_date).getFullYear() : 'Present'}</span>
+              <span>${escapeHtml(exp.role)} - ${escapeHtml(exp.company)}</span>
+              <span class="date">${formatYear(exp.start_date)} - ${formatYear(exp.end_date)}</span>
             </div>
-            <p style="margin: 5px 0 0;">${exp.description || ''}</p>
-            <ul>
-              ${tasks.map((t: string) => `<li>${t}</li>`).join('')}
-            </ul>
+            ${exp.description ? `<p style="margin: 5px 0 0;">${escapeHtml(exp.description)}</p>` : ''}
+            ${tasks.length > 0 ? `<ul>${tasks.map((t: string) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>` : ''}
           </div>
           `;
         }).join('')}
@@ -91,8 +125,8 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
         ${profile.educations.map((edu: any) => `
         <div class="item">
           <div class="item-title">
-            <span>${edu.degree} - ${edu.institution}</span>
-            <span class="date">${new Date(edu.start_date).getFullYear()} - ${edu.end_date ? new Date(edu.end_date).getFullYear() : 'Present'}</span>
+            <span>${escapeHtml(edu.degree)} - ${escapeHtml(edu.institution)}</span>
+            <span class="date">${formatYear(edu.start_date)} - ${formatYear(edu.end_date)}</span>
           </div>
         </div>
         `).join('')}
@@ -102,7 +136,7 @@ export function buildCvHtml(profile: any, jobDesc: string): string {
       <div>
         <h2>Skills</h2>
         <div class="skills-container">
-          ${(profile.skills || []).map((s: any) => `<span class="skill-badge">${s.name}</span>`).join('')}
+          ${(profile.skills || []).map((s: any) => `<span class="skill-badge">${escapeHtml(typeof s === 'string' ? s : s.name)}</span>`).join('')}
         </div>
       </div>
     </body>

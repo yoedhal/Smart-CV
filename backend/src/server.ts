@@ -3,18 +3,46 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import prisma from './db';
 import { GoogleGenAI } from '@google/genai';
-import { generatePdfFromHtml, buildCvHtml } from './pdfService';
+import { generatePdfFromHtml, buildCvHtml, closeBrowser } from './pdfService';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'smartcv-dev-secret-2024';
 
-app.use(cors());
-app.use(express.json());
+// ── Require JWT_SECRET in env (no hardcoded fallback) ──────────────────────
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is not set.');
+  process.exit(1);
+}
+
+// ── CORS: whitelist from env ────────────────────────────────────────────────
+const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+app.use(cors({ origin: allowedOrigin, credentials: true }));
+
+// ── Body size limit (prevent huge payloads) ────────────────────────────────
+app.use(express.json({ limit: '100kb' }));
+
+// ── Rate limiters ───────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  message: { error: 'Too many requests, please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const generateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: 'Too many CV generation requests. Please wait a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ──────────────────────────────────────────────
 // Types
@@ -25,6 +53,18 @@ declare global {
       user?: { id: string; email: string };
     }
   }
+}
+
+// ── Input helpers ────────────────────────────────────────────────────────────
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(email: string): boolean {
+  return EMAIL_REGEX.test(email) && email.length <= 254;
+}
+
+function sanitizeString(value: unknown, maxLen = 500): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim().slice(0, maxLen);
 }
 
 // ──────────────────────────────────────────────
@@ -42,7 +82,7 @@ const authenticate = (req: Request, res: Response, next: NextFunction): void => 
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
+    const decoded = jwt.verify(token, JWT_SECRET!) as { id: string; email: string };
     req.user = decoded;
     next();
   } catch {
@@ -60,17 +100,29 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // ──────────────────────────────────────────────
 // Auth Routes
 // ──────────────────────────────────────────────
-app.post('/api/auth/register', async (req: Request, res: Response) => {
+app.post('/api/auth/register', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { email, password, full_name } = req.body;
+    const email = sanitizeString(req.body.email, 254);
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const full_name = sanitizeString(req.body.full_name, 200);
 
     if (!email || !password || !full_name) {
       res.status(400).json({ error: 'Please fill in all fields' });
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    if (!isValidEmail(email)) {
+      res.status(400).json({ error: 'Please enter a valid email address' });
+      return;
+    }
+
+    if (password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters long' });
+      return;
+    }
+
+    if (full_name.length < 2) {
+      res.status(400).json({ error: 'Please enter your full name' });
       return;
     }
 
@@ -90,7 +142,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       data: { user_id: user.id, contact_email: email }
     });
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET!, { expiresIn: '30d' });
 
     res.status(201).json({
       token,
@@ -102,9 +154,10 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+app.post('/api/auth/login', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const email = sanitizeString(req.body.email, 254);
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
 
     if (!email || !password) {
       res.status(400).json({ error: 'Please enter your email and password' });
@@ -123,7 +176,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET!, { expiresIn: '30d' });
 
     res.json({
       token,
@@ -157,7 +210,11 @@ app.get('/api/master-profile', authenticate, async (req: Request, res: Response)
 
 app.put('/api/master-profile', authenticate, async (req: Request, res: Response) => {
   try {
-    const { contact_email, phone, linkedin_url, location, professional_summary } = req.body;
+    const contact_email = sanitizeString(req.body.contact_email, 254);
+    const phone = sanitizeString(req.body.phone, 30);
+    const linkedin_url = sanitizeString(req.body.linkedin_url, 300);
+    const location = sanitizeString(req.body.location, 200);
+    const professional_summary = sanitizeString(req.body.professional_summary, 2000);
 
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
@@ -165,12 +222,14 @@ app.put('/api/master-profile', authenticate, async (req: Request, res: Response)
       return;
     }
 
-    // Update user's full_name if provided
     if (req.body.full_name) {
-      await prisma.user.update({
-        where: { id: req.user!.id },
-        data: { full_name: req.body.full_name }
-      });
+      const full_name = sanitizeString(req.body.full_name, 200);
+      if (full_name) {
+        await prisma.user.update({
+          where: { id: req.user!.id },
+          data: { full_name }
+        });
+      }
     }
 
     const updated = await prisma.masterProfile.update({
@@ -186,7 +245,19 @@ app.put('/api/master-profile', authenticate, async (req: Request, res: Response)
 
 app.post('/api/master-profile/experience', authenticate, async (req: Request, res: Response) => {
   try {
-    const { company, role, start_date, end_date, description, responsibilities } = req.body;
+    const company = sanitizeString(req.body.company, 200);
+    const role = sanitizeString(req.body.role, 200);
+    const start_date = sanitizeString(req.body.start_date, 20);
+    const end_date = sanitizeString(req.body.end_date, 20);
+    const description = sanitizeString(req.body.description, 1000);
+    const responsibilities = Array.isArray(req.body.responsibilities)
+      ? req.body.responsibilities.slice(0, 20).map((r: unknown) => String(r).slice(0, 500))
+      : [];
+
+    if (!company || !role || !start_date) {
+      res.status(400).json({ error: 'Company, role, and start date are required' });
+      return;
+    }
 
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
@@ -202,7 +273,7 @@ app.post('/api/master-profile/experience', authenticate, async (req: Request, re
         start_date: new Date(start_date),
         end_date: end_date ? new Date(end_date) : null,
         description,
-        responsibilities: JSON.stringify(responsibilities || [])
+        responsibilities: JSON.stringify(responsibilities)
       }
     });
 
@@ -214,6 +285,15 @@ app.post('/api/master-profile/experience', authenticate, async (req: Request, re
 
 app.delete('/api/master-profile/experience/:id', authenticate, async (req: Request, res: Response) => {
   try {
+    // Verify ownership before deleting
+    const exp = await prisma.experience.findUnique({
+      where: { id: String(req.params.id) },
+      include: { master_profile: true }
+    });
+    if (!exp || exp.master_profile.user_id !== req.user!.id) {
+      res.status(404).json({ error: 'Experience not found' });
+      return;
+    }
     await prisma.experience.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
@@ -223,7 +303,14 @@ app.delete('/api/master-profile/experience/:id', authenticate, async (req: Reque
 
 app.post('/api/master-profile/skill', authenticate, async (req: Request, res: Response) => {
   try {
-    const { name, category } = req.body;
+    const name = sanitizeString(req.body.name, 100);
+    const category = sanitizeString(req.body.category, 50);
+
+    if (!name) {
+      res.status(400).json({ error: 'Skill name is required' });
+      return;
+    }
+
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
       res.status(404).json({ error: 'Profile not found' });
@@ -241,6 +328,15 @@ app.post('/api/master-profile/skill', authenticate, async (req: Request, res: Re
 
 app.delete('/api/master-profile/skill/:id', authenticate, async (req: Request, res: Response) => {
   try {
+    // Verify ownership before deleting
+    const skill = await prisma.skill.findUnique({
+      where: { id: String(req.params.id) },
+      include: { master_profile: true }
+    });
+    if (!skill || skill.master_profile.user_id !== req.user!.id) {
+      res.status(404).json({ error: 'Skill not found' });
+      return;
+    }
     await prisma.skill.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
@@ -250,7 +346,16 @@ app.delete('/api/master-profile/skill/:id', authenticate, async (req: Request, r
 
 app.post('/api/master-profile/education', authenticate, async (req: Request, res: Response) => {
   try {
-    const { institution, degree, start_date, end_date } = req.body;
+    const institution = sanitizeString(req.body.institution, 200);
+    const degree = sanitizeString(req.body.degree, 200);
+    const start_date = sanitizeString(req.body.start_date, 20);
+    const end_date = sanitizeString(req.body.end_date, 20);
+
+    if (!institution || !degree || !start_date) {
+      res.status(400).json({ error: 'Institution, degree, and start date are required' });
+      return;
+    }
+
     const profile = await prisma.masterProfile.findFirst({ where: { user_id: req.user!.id } });
     if (!profile) {
       res.status(404).json({ error: 'Profile not found' });
@@ -274,6 +379,15 @@ app.post('/api/master-profile/education', authenticate, async (req: Request, res
 
 app.delete('/api/master-profile/education/:id', authenticate, async (req: Request, res: Response) => {
   try {
+    // Verify ownership before deleting
+    const edu = await prisma.education.findUnique({
+      where: { id: String(req.params.id) },
+      include: { master_profile: true }
+    });
+    if (!edu || edu.master_profile.user_id !== req.user!.id) {
+      res.status(404).json({ error: 'Education not found' });
+      return;
+    }
     await prisma.education.delete({ where: { id: String(req.params.id) } });
     res.json({ success: true });
   } catch (error) {
@@ -284,9 +398,18 @@ app.delete('/api/master-profile/education/:id', authenticate, async (req: Reques
 // ──────────────────────────────────────────────
 // AI CV Generation
 // ──────────────────────────────────────────────
-app.post('/api/generate-cv', authenticate, async (req: Request, res: Response) => {
+const MAX_JOB_DESC_LENGTH = 10000;
+
+app.post('/api/generate-cv', authenticate, generateLimiter, async (req: Request, res: Response) => {
   try {
-    const { job_title, company_name, job_description_text } = req.body;
+    const job_title = sanitizeString(req.body.job_title, 200) || 'Unspecified Role';
+    const company_name = sanitizeString(req.body.company_name, 200) || 'Unspecified Company';
+    let job_description_text = sanitizeString(req.body.job_description_text, MAX_JOB_DESC_LENGTH);
+
+    if (!job_description_text || job_description_text.length < 20) {
+      res.status(400).json({ error: 'Please provide a job description (at least 20 characters)' });
+      return;
+    }
 
     const profile = await prisma.masterProfile.findFirst({
       where: { user_id: req.user!.id },
@@ -319,8 +442,8 @@ Instructions:
 5. Do NOT include any explanations or markdown. Just raw JSON.`;
 
         const promptText = `
-Job Title: ${job_title || 'Not specified'}
-Company: ${company_name || 'Not specified'}
+Job Title: ${job_title}
+Company: ${company_name}
 Job Description:
 ${job_description_text}
 
@@ -334,36 +457,47 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
 })))}
 `;
 
-        const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
-          contents: promptText,
-          config: { systemInstruction: systemPrompt }
-        });
+        const result = await Promise.race([
+          ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: promptText,
+            config: { systemInstruction: systemPrompt }
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Gemini API timeout')), 30000)
+          )
+        ]);
 
-        const aiResponseText = result.text;
+        const aiResponseText = (result as any).text;
         if (aiResponseText) {
           try {
-            const cleanJson = aiResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
+            // Strip markdown code blocks if present
+            const cleanJson = aiResponseText
+              .replace(/```json\s*/gi, '')
+              .replace(/```\s*/g, '')
+              .trim();
             const parsed = JSON.parse(cleanJson);
 
-            if (parsed.filtered_skills) {
+            if (Array.isArray(parsed.filtered_skills)) {
               tailoredContent.filtered_skills = profile.skills.filter(s =>
                 parsed.filtered_skills.some((name: string) =>
-                  name.toLowerCase().includes(s.name.toLowerCase()) ||
-                  s.name.toLowerCase().includes(name.toLowerCase())
+                  typeof name === 'string' && (
+                    name.toLowerCase().includes(s.name.toLowerCase()) ||
+                    s.name.toLowerCase().includes(name.toLowerCase())
+                  )
                 )
               );
             }
 
-            if (parsed.filtered_experiences) {
+            if (Array.isArray(parsed.filtered_experiences)) {
               tailoredContent.filtered_experiences = parsed.filtered_experiences
                 .map((aiExp: any) => {
                   const original = profile.experiences.find(e => e.id === aiExp.id);
                   if (original) {
-                    return {
-                      ...original,
-                      responsibilities: JSON.stringify(aiExp.responsibilities || JSON.parse(original.responsibilities || '[]'))
-                    };
+                    const responsibilities = Array.isArray(aiExp.responsibilities)
+                      ? aiExp.responsibilities
+                      : (() => { try { return JSON.parse(original.responsibilities || '[]'); } catch { return []; } })();
+                    return { ...original, responsibilities: JSON.stringify(responsibilities) };
                   }
                   return null;
                 })
@@ -387,9 +521,9 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
     const jobApp = await prisma.jobApplication.create({
       data: {
         user_id: req.user!.id,
-        job_title: job_title || 'Unspecified Role',
-        company_name: company_name || 'Unspecified Company',
-        job_description_text: job_description_text
+        job_title,
+        company_name,
+        job_description_text
       }
     });
 
@@ -411,7 +545,7 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
 // ──────────────────────────────────────────────
 // CV Download / Preview
 // ──────────────────────────────────────────────
-async function buildCvData(jobAppId: string) {
+async function buildCvData(jobAppId: string, userId: string) {
   const genCv = await prisma.generatedCV.findUnique({
     where: { job_application_id: jobAppId }
   });
@@ -423,11 +557,20 @@ async function buildCvData(jobAppId: string) {
   });
   if (!jobApp) return null;
 
+  // Verify ownership
+  if (jobApp.user_id !== userId) return null;
+
   const profile: any = await prisma.masterProfile.findFirst({
     where: { user_id: jobApp.user_id }
   });
 
-  const tailored = JSON.parse(genCv.tailored_content);
+  let tailored: any;
+  try {
+    tailored = JSON.parse(genCv.tailored_content);
+  } catch {
+    tailored = { filtered_experiences: [], filtered_educations: [], filtered_skills: [] };
+  }
+
   profile.experiences = tailored.filtered_experiences || [];
   profile.educations = tailored.filtered_educations || [];
   profile.skills = tailored.filtered_skills || [];
@@ -438,7 +581,7 @@ async function buildCvData(jobAppId: string) {
 
 app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Response) => {
   try {
-    const data = await buildCvData(String(req.params.jobAppId));
+    const data = await buildCvData(String(req.params.jobAppId), req.user!.id);
     if (!data) { res.status(404).send('CV not found'); return; }
 
     const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
@@ -455,7 +598,7 @@ app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Respons
 
 app.get('/api/cv/:jobAppId/html', authenticate, async (req: Request, res: Response) => {
   try {
-    const data = await buildCvData(String(req.params.jobAppId));
+    const data = await buildCvData(String(req.params.jobAppId), req.user!.id);
     if (!data) { res.status(404).send('CV not found'); return; }
 
     const html = buildCvHtml(data.profile, data.jobApp.job_description_text);
@@ -467,19 +610,59 @@ app.get('/api/cv/:jobAppId/html', authenticate, async (req: Request, res: Respon
 });
 
 // ──────────────────────────────────────────────
-// Applications History
+// Applications History (with pagination)
 // ──────────────────────────────────────────────
 app.get('/api/applications', authenticate, async (req: Request, res: Response) => {
   try {
-    const apps = await prisma.jobApplication.findMany({
-      where: { user_id: req.user!.id },
-      include: { generated_cv: true },
-      orderBy: { created_at: 'desc' }
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));
+    const search = sanitizeString(req.query.search as string, 200);
+
+    const where: any = { user_id: req.user!.id };
+    if (search) {
+      where.OR = [
+        { job_title: { contains: search } },
+        { company_name: { contains: search } }
+      ];
+    }
+
+    const [apps, total] = await Promise.all([
+      prisma.jobApplication.findMany({
+        where,
+        include: { generated_cv: { select: { id: true, generated_at: true } } },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit
+      }),
+      prisma.jobApplication.count({ where })
+    ]);
+
+    res.json({
+      data: apps,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
     });
-    res.json(apps);
   } catch (error) {
     res.status(500).json({ error: 'Error loading history' });
   }
+});
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+process.on('SIGTERM', async () => {
+  console.log('Shutting down server...');
+  await closeBrowser();
+  await prisma.$disconnect();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  await closeBrowser();
+  await prisma.$disconnect();
+  process.exit(0);
 });
 
 app.listen(port, () => {
