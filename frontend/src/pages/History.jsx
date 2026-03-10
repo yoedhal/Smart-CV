@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { History as HistoryIcon, Download, Eye, Calendar, Building2, FileText, X, Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { getApplications, getPdfDownloadUrl, getHtmlPreviewUrl } from '../services/api';
+import { getApplications, getPdfDownloadUrl, getHtmlPreviewUrl, getPreviewToken } from '../services/api';
 import { useToast } from '../context/ToastContext';
 
 const PAGE_SIZE = 10;
@@ -10,6 +10,7 @@ const History = () => {
   const [applications, setApplications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [previewApp, setPreviewApp] = useState(null);
+  const [previewToken, setPreviewToken] = useState(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -45,6 +46,14 @@ const History = () => {
   }, [page, debouncedSearch]);
 
   useEffect(() => { fetchApps(); }, [fetchApps]);
+
+  // Fetch preview token when modal opens
+  useEffect(() => {
+    if (!previewApp) { setPreviewToken(null); return; }
+    getPreviewToken(previewApp.id)
+      .then(token => setPreviewToken(token))
+      .catch(() => setPreviewToken(null));
+  }, [previewApp]);
 
   // Close modal on Escape key
   useEffect(() => {
@@ -134,15 +143,20 @@ const History = () => {
                     >
                       <Eye size={16} /> Preview
                     </button>
-                    <a
-                      href={getPdfDownloadUrl(app.id)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      onClick={async () => {
+                        try {
+                          const token = await getPreviewToken(app.id);
+                          window.open(getPdfDownloadUrl(app.id, token), '_blank');
+                        } catch {
+                          window.open(getPdfDownloadUrl(app.id, null), '_blank');
+                        }
+                      }}
                       className="btn btn-primary"
-                      style={{ padding: '0.55rem 1rem', fontSize: '0.9rem', textDecoration: 'none' }}
+                      style={{ padding: '0.55rem 1rem', fontSize: '0.9rem' }}
                     >
                       <Download size={16} /> PDF
-                    </a>
+                    </button>
                   </div>
                 )}
               </div>
@@ -202,7 +216,7 @@ const History = () => {
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                 <a
-                  href={getPdfDownloadUrl(previewApp.id)}
+                  href={getPdfDownloadUrl(previewApp.id, previewToken)}
                   target="_blank"
                   rel="noreferrer"
                   className="btn btn-primary"
@@ -215,11 +229,17 @@ const History = () => {
                 </button>
               </div>
             </div>
-            <iframe
-              src={getHtmlPreviewUrl(previewApp.id)}
-              style={{ flex: 1, border: 'none', background: '#fff' }}
-              title="CV Preview"
-            />
+            {previewToken ? (
+              <iframe
+                src={getHtmlPreviewUrl(previewApp.id, previewToken)}
+                style={{ flex: 1, border: 'none', background: '#fff' }}
+                title="CV Preview"
+              />
+            ) : (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid rgba(129,140,248,0.2)', borderTop: '3px solid #818cf8', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -83,12 +83,27 @@ export const getApplications = async ({ page = 1, limit = 20, search = '' } = {}
   return response.data;
 };
 
-export const getPdfDownloadUrl = (jobAppId) => {
+// Issue a short-lived (10 min) preview token for iframe/download use
+// This avoids exposing the long-lived JWT in browser history or server logs
+export const getPreviewToken = async (jobAppId) => {
+  const response = await api.post(`/cv/${jobAppId}/preview-token`);
+  return response.data.token;
+};
+
+export const getPdfDownloadUrl = (jobAppId, previewToken) => {
+  if (previewToken) {
+    return `${api.defaults.baseURL}/cv/${jobAppId}/pdf?token=${previewToken}`;
+  }
+  // Legacy fallback using long-lived JWT
   const token = localStorage.getItem('smartcv_token');
   return `${api.defaults.baseURL}/cv/${jobAppId}/pdf?token=${token}`;
 };
 
-export const getHtmlPreviewUrl = (jobAppId) => {
+export const getHtmlPreviewUrl = (jobAppId, previewToken) => {
+  if (previewToken) {
+    return `${api.defaults.baseURL}/cv/${jobAppId}/html?token=${previewToken}`;
+  }
+  // Legacy fallback using long-lived JWT
   const token = localStorage.getItem('smartcv_token');
   return `${api.defaults.baseURL}/cv/${jobAppId}/html?token=${token}`;
 };

@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import prisma from './db';
 import { GoogleGenAI } from '@google/genai';
@@ -423,7 +424,12 @@ Return ONLY a strict JSON object with these fields (use null for missing values)
   "location": string | null,
   "linkedin_url": string | null,
   "professional_summary": string | null,
-  "skills": string[],
+  "skills": [
+    {
+      "name": string,
+      "category": "Frontend" | "Backend" | "Languages" | "DevOps" | "Tools" | "Databases" | "Mobile" | "AI/ML" | "Management" | "Soft Skills" | "Other"
+    }
+  ],
   "experiences": [
     {
       "company": string,
@@ -443,6 +449,17 @@ Return ONLY a strict JSON object with these fields (use null for missing values)
     }
   ]
 }
+Skill categorization rules:
+- Frontend: React, Vue, Angular, CSS, HTML, Tailwind, etc.
+- Backend: Node.js, Express, Django, Spring, Rails, etc.
+- Languages: JavaScript, TypeScript, Python, Java, Go, etc.
+- DevOps: Docker, Kubernetes, CI/CD, AWS, GCP, Azure, etc.
+- Databases: PostgreSQL, MySQL, MongoDB, Redis, etc.
+- Tools: Git, Jira, Figma, Postman, etc.
+- Mobile: iOS, Android, React Native, Flutter, etc.
+- AI/ML: TensorFlow, PyTorch, LangChain, etc.
+- Management: Agile, Scrum, Team Leadership, etc.
+- Soft Skills: Communication, Problem Solving, etc.
 No explanations, no markdown, just raw JSON.`;
 
     const result = await Promise.race([
@@ -503,30 +520,62 @@ app.post('/api/generate-cv', authenticate, generateLimiter, async (req: Request,
       if (apiKey && profile && profile.experiences.length > 0) {
         const ai = new GoogleGenAI({ apiKey });
 
-        const systemPrompt = `You are an expert HR AI assistant. Your goal is to tailor the user's master profile to a specific job description.
-Instructions:
-1. Select only the most relevant skills (as array of name strings).
-2. Select the most relevant work experiences (by their ID).
-3. For each selected experience, rephrase the "responsibilities" to highlight keywords from the job description.
-4. Return ONLY a strict JSON object with:
-   - "filtered_skills": array of skill name strings that match.
-   - "filtered_experiences": array of objects: { "id": "original_id", "responsibilities": ["bullet 1", "bullet 2"] }
-5. Do NOT include any explanations or markdown. Just raw JSON.`;
+        const systemPrompt = `You are an expert CV writer and HR specialist with 15+ years of experience placing candidates at top companies. Your task is to create compelling, tailored CV content for a specific job application.
+
+Given the candidate's full profile and a job description, you must:
+
+1. Write "tailored_summary": A powerful 2-3 sentence professional summary (max 70 words) that:
+   - Directly references the target role and company context
+   - Highlights the candidate's most relevant experience and quantified achievements
+   - Naturally incorporates key skills and keywords from the job description
+   - Sounds confident, specific, and human — NOT generic or formulaic
+
+2. Write "job_headline": A concise professional title (3-6 words) that precisely reflects the target role (e.g., "Senior Full Stack Engineer", "Product Manager – SaaS")
+
+3. Select "filtered_skills": 8-15 skills from the candidate's skill list that are most relevant to this specific job. Use exact names from the candidate's list.
+
+4. Select "filtered_experiences": The most relevant work experiences. Rules:
+   - Include ALL roles if the candidate has 4 or fewer; otherwise select the 3 most relevant
+   - For each selected role, rewrite "responsibilities" as 3-5 powerful bullet points:
+     * Start every bullet with a strong action verb (Developed, Led, Architected, Optimized, Delivered, Scaled, Designed, etc.)
+     * Use past tense for past roles, present tense for current role
+     * Be specific about scope and impact (mention team sizes, percentages, systems, scale where inferable)
+     * Naturally weave in keywords from the job description
+     * Avoid vague statements like "worked on" or "helped with"
+
+Return ONLY raw JSON with no markdown, no code blocks, no explanations:
+{"tailored_summary":"...","job_headline":"...","filtered_skills":["skill1","skill2"],"filtered_experiences":[{"id":"original_id","responsibilities":["Strong action verb + specific achievement..."]}]}`;
+
+        const formatExpDate = (d: string | Date | null) => {
+          if (!d) return 'Present';
+          try { return new Date(d).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); } catch { return 'Present'; }
+        };
 
         const promptText = `
 Job Title: ${job_title}
 Company: ${company_name}
+
 Job Description:
 ${job_description_text}
 
 Candidate Profile:
-Skills: ${JSON.stringify(profile.skills.map(s => s.name))}
-Experience: ${JSON.stringify(profile.experiences.map(e => ({
+Current Professional Summary: ${profile.professional_summary || 'Not provided'}
+Skills: ${JSON.stringify(profile.skills.map(s => ({ name: s.name, category: s.category || 'General' })))}
+Work Experience:
+${JSON.stringify(profile.experiences.map(e => ({
   id: e.id,
   role: e.role,
   company: e.company,
+  period: `${formatExpDate(e.start_date)} – ${formatExpDate(e.end_date)}`,
+  description: e.description || '',
   responsibilities: (() => { try { return JSON.parse(e.responsibilities || '[]'); } catch { return []; } })()
-})))}
+})), null, 2)}
+Education:
+${JSON.stringify(profile.educations.map(e => ({
+  degree: e.degree,
+  institution: e.institution,
+  period: `${formatExpDate(e.start_date)} – ${formatExpDate(e.end_date)}`
+})), null, 2)}
 `;
 
         const result = await Promise.race([
@@ -549,6 +598,14 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
               .replace(/```\s*/g, '')
               .trim();
             const parsed = JSON.parse(cleanJson);
+
+            // Extract tailored summary and headline
+            if (typeof parsed.tailored_summary === 'string' && parsed.tailored_summary.trim()) {
+              tailoredContent.tailored_summary = parsed.tailored_summary.trim();
+            }
+            if (typeof parsed.job_headline === 'string' && parsed.job_headline.trim()) {
+              tailoredContent.job_headline = parsed.job_headline.trim();
+            }
 
             if (Array.isArray(parsed.filtered_skills)) {
               tailoredContent.filtered_skills = profile.skills.filter(s =>
@@ -577,6 +634,7 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
             }
 
             tailoredContent.filtered_educations = profile.educations;
+            tailoredContent.ai_used = true;
             console.log('Successfully tailored CV with Gemini AI.');
           } catch (parseError) {
             console.error('Failed to parse Gemini JSON, using full profile:', parseError);
@@ -607,12 +665,65 @@ Experience: ${JSON.stringify(profile.experiences.map(e => ({
       }
     });
 
-    res.json({ ...genCv, job_application_id: jobApp.id });
+    res.json({ ...genCv, job_application_id: jobApp.id, ai_used: tailoredContent.ai_used || false });
   } catch (error) {
     console.error('CV generation error:', error);
     res.status(500).json({ error: 'Error generating CV. Ensure you have filled out your profile info.' });
   }
 });
+
+// ──────────────────────────────────────────────
+// Short-lived CV Preview Token (avoids long-lived JWT in URL)
+// ──────────────────────────────────────────────
+const previewTokenStore = new Map<string, { userId: string; jobAppId: string; expiresAt: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of previewTokenStore.entries()) {
+    if (v.expiresAt < now) previewTokenStore.delete(k);
+  }
+}, 60 * 1000);
+
+app.post('/api/cv/:jobAppId/preview-token', authenticate, async (req: Request, res: Response) => {
+  const jobAppId = String(req.params.jobAppId);
+  const jobApp = await prisma.jobApplication.findUnique({ where: { id: jobAppId } });
+  if (!jobApp || jobApp.user_id !== req.user!.id) {
+    res.status(404).json({ error: 'CV not found' });
+    return;
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  previewTokenStore.set(token, { userId: req.user!.id, jobAppId, expiresAt: Date.now() + 10 * 60 * 1000 });
+  res.json({ token, expires_in: 600 });
+});
+
+const authenticateForPreview = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const authHeader = req.headers['authorization'];
+  const bearerToken = authHeader && authHeader.split(' ')[1];
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+
+  if (queryToken && previewTokenStore.has(queryToken)) {
+    const entry = previewTokenStore.get(queryToken)!;
+    if (entry.expiresAt >= Date.now() && entry.jobAppId === req.params.jobAppId) {
+      req.user = { id: entry.userId, email: '' };
+      next();
+      return;
+    }
+    previewTokenStore.delete(queryToken);
+  }
+
+  const token = bearerToken || queryToken;
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET!) as { id: string; email: string };
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token, please log in again.' });
+  }
+};
 
 // ──────────────────────────────────────────────
 // CV Download / Preview
@@ -647,11 +758,17 @@ async function buildCvData(jobAppId: string, userId: string) {
   profile.educations = tailored.filtered_educations || [];
   profile.skills = tailored.filtered_skills || [];
   profile.full_name = (jobApp as any).user?.full_name || '';
+  // Use AI-tailored summary if available, otherwise fall back to profile summary
+  if (tailored.tailored_summary) {
+    profile.professional_summary = tailored.tailored_summary;
+  }
+  profile.job_headline = tailored.job_headline || '';
+  profile.ai_used = tailored.ai_used || false;
 
   return { genCv, jobApp, profile };
 }
 
-app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Response) => {
+app.get('/api/cv/:jobAppId/pdf', authenticateForPreview, async (req: Request, res: Response) => {
   try {
     const data = await buildCvData(String(req.params.jobAppId), req.user!.id);
     if (!data) { res.status(404).send('CV not found'); return; }
@@ -668,7 +785,7 @@ app.get('/api/cv/:jobAppId/pdf', authenticate, async (req: Request, res: Respons
   }
 });
 
-app.get('/api/cv/:jobAppId/html', authenticate, async (req: Request, res: Response) => {
+app.get('/api/cv/:jobAppId/html', authenticateForPreview, async (req: Request, res: Response) => {
   try {
     const data = await buildCvData(String(req.params.jobAppId), req.user!.id);
     if (!data) { res.status(404).send('CV not found'); return; }

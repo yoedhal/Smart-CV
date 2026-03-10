@@ -23,6 +23,7 @@ const Dashboard = () => {
   const [newEdu, setNewEdu] = useState({ institution: '', degree: '', start_date: '', end_date: '' });
 
   const [newSkill, setNewSkill] = useState('');
+  const [newSkillCategory, setNewSkillCategory] = useState('General');
 
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
@@ -137,7 +138,7 @@ const Dashboard = () => {
   const handleAddSkill = async () => {
     if (!newSkill.trim()) return;
     try {
-      await addSkill({ name: newSkill.trim(), category: 'General' });
+      await addSkill({ name: newSkill.trim(), category: newSkillCategory || 'General' });
       setNewSkill('');
       fetchProfile();
     } catch (e) {
@@ -187,10 +188,12 @@ const Dashboard = () => {
       };
       await updateMasterProfile(profileUpdate);
 
-      // Add skills
-      const skillPromises = (parsedData.skills || []).slice(0, 30).map(name =>
-        addSkill({ name: String(name).trim(), category: 'General' }).catch(() => null)
-      );
+      // Add skills (support both string[] and {name, category}[] formats)
+      const skillPromises = (parsedData.skills || []).slice(0, 30).map(skillItem => {
+        const name = typeof skillItem === 'string' ? skillItem : skillItem.name;
+        const category = typeof skillItem === 'object' ? (skillItem.category || 'General') : 'General';
+        return addSkill({ name: String(name).trim(), category }).catch(() => null);
+      });
 
       // Add experiences
       const expPromises = (parsedData.experiences || []).slice(0, 10).map(exp =>
@@ -413,7 +416,7 @@ const Dashboard = () => {
         {/* Skills Section */}
         <section className="glass-panel">
           <h2 style={{ marginBottom: '1.25rem' }}>Skills</h2>
-          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
             <input
               type="text"
               className="form-input"
@@ -421,8 +424,18 @@ const Dashboard = () => {
               value={newSkill}
               onChange={e => setNewSkill(e.target.value)}
               onKeyDown={handleSkillKeyDown}
-              style={{ flex: 1 }}
+              style={{ flex: '2 1 180px' }}
             />
+            <select
+              className="form-input"
+              value={newSkillCategory}
+              onChange={e => setNewSkillCategory(e.target.value)}
+              style={{ flex: '1 1 120px', cursor: 'pointer' }}
+            >
+              {['General','Frontend','Backend','Languages','DevOps','Databases','Tools','Mobile','AI/ML','Management','Soft Skills'].map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
             <button
               className="btn btn-primary"
               onClick={handleAddSkill}
@@ -433,20 +446,53 @@ const Dashboard = () => {
             </button>
           </div>
           {skills.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>Add at least one skill so the AI can filter.</p>
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>Add at least one skill so the AI can filter and match them to job requirements.</p>
           ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-              {skills.map(skill => (
-                <span key={skill.id} style={{
-                  background: 'rgba(79, 70, 229, 0.15)', border: '1px solid rgba(79, 70, 229, 0.4)',
-                  padding: '0.4rem 0.85rem', borderRadius: '20px', fontSize: '0.875rem',
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#c7d2fe'
-                }}>
-                  {skill.name}
-                  <X size={13} style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => handleDeleteSkill(skill.id)} />
-                </span>
-              ))}
-            </div>
+            (() => {
+              // Group by category for display
+              const grouped = {};
+              for (const skill of skills) {
+                const cat = skill.category || 'General';
+                if (!grouped[cat]) grouped[cat] = [];
+                grouped[cat].push(skill);
+              }
+              const entries = Object.entries(grouped);
+              const isGrouped = entries.length > 1;
+              return isGrouped ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {entries.map(([cat, catSkills]) => (
+                    <div key={cat}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{cat}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        {catSkills.map(skill => (
+                          <span key={skill.id} style={{
+                            background: 'rgba(79, 70, 229, 0.15)', border: '1px solid rgba(79, 70, 229, 0.4)',
+                            padding: '0.4rem 0.85rem', borderRadius: '20px', fontSize: '0.875rem',
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#c7d2fe'
+                          }}>
+                            {skill.name}
+                            <X size={13} style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => handleDeleteSkill(skill.id)} />
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {skills.map(skill => (
+                    <span key={skill.id} style={{
+                      background: 'rgba(79, 70, 229, 0.15)', border: '1px solid rgba(79, 70, 229, 0.4)',
+                      padding: '0.4rem 0.85rem', borderRadius: '20px', fontSize: '0.875rem',
+                      display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#c7d2fe'
+                    }}>
+                      {skill.name}
+                      <X size={13} style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => handleDeleteSkill(skill.id)} />
+                    </span>
+                  ))}
+                </div>
+              );
+            })()
           )}
         </section>
       </div>
@@ -508,6 +554,23 @@ const Dashboard = () => {
                     {' · '}
                     <span><strong>Education:</strong> {(parsedData.educations || []).length}</span>
                   </div>
+                  {(parsedData.skills || []).length > 0 && (
+                    <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      {(parsedData.skills || []).slice(0, 15).map((s, i) => (
+                        <span key={i} style={{
+                          fontSize: '0.78rem', padding: '0.2rem 0.6rem', borderRadius: '12px',
+                          background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc'
+                        }}>
+                          {typeof s === 'string' ? s : s.name}
+                        </span>
+                      ))}
+                      {(parsedData.skills || []).length > 15 && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', alignSelf: 'center' }}>
+                          +{(parsedData.skills || []).length - 15} more
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
